@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS document_files (
+  uuid VARCHAR(30) NOT NULL PRIMARY KEY,
+  file_name VARCHAR(500) NOT NULL,
+  file_format VARCHAR(20) NOT NULL,
+  file_status VARCHAR(20) NOT NULL DEFAULT 'UPLOADED',
+  file_size BIGINT NOT NULL,
+  rgst_dt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  rgst_nm VARCHAR(100) NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  updt_dt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updt_nm VARCHAR(100) NOT NULL,
+  INDEX idx_status (status),
+  INDEX idx_file_format (file_format),
+  INDEX idx_rgst_dt (rgst_dt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

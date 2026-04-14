@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  uuid        String   @id @db.VarChar(30)
+  file_name   String   @db.VarChar(500)
+  user_key    String   @db.VarChar(100)
+  file_format String   @db.VarChar(20)
+  file_status String   @default("UPLOADED") @db.VarChar(20)
+  file_size   BigInt   @db.BigInt
+  rgst_dt     DateTime @default(now()) @db.DateTime(0)
+  rgst_nm     String   @db.VarChar(100)
+  status      String   @default("ACTIVE") @db.VarChar(10)
+  updt_dt     DateTime @updatedAt @db.DateTime(0)
+  updt_nm     String   @db.VarChar(100)
+
+  @@map("document_files")
+}

@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+__tests__
+*.md
+.env.local
+.env
+*.drawio
+*.bkp
+.claude

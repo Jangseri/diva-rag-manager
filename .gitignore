@@ -30,11 +30,25 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (실제 값은 git 제외, 템플릿만 커밋)
 .env*
+!.env.example
+!.env.production.example
 
 # vercel
 .vercel
+
+# local file storage
+/storage
+
+# logs
+/logs
+
+# Claude Code 세션 데이터
+.claude/
+
+# drawio 백업
+.$*.drawio.bkp
 
 # typescript
 *.tsbuildinfo

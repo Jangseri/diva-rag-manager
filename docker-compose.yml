@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  rag-manager:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: diva-rag-manager
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - ORIGIN_PATH=/data/diva/origin
+      - EXTRACT_PATH=/data/diva/extract
+      - ENABLE_REDIS_CONSUMER=true
+      - MAX_FILE_SIZE_MB=100
+      - NEXT_PUBLIC_APP_URL=http://192.168.220.223:3000
+    volumes:
+      - /data/diva:/data/diva
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - rag-network
+
+networks:
+  rag-network:
+    driver: bridge
