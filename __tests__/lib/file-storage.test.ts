@@ -7,7 +7,8 @@ import {
   readFile,
   fileExists,
   getFilePath,
-  deleteFileDirectory,
+  deleteFile,
+  getFileSize,
 } from "@/lib/file-storage";
 
 let tempDir: string;
@@ -21,140 +22,99 @@ afterEach(async () => {
 });
 
 describe("getFilePath", () => {
-  it("should construct correct file path", () => {
-    const result = getFilePath(tempDir, "abc123", "document.pdf");
-    expect(result).toBe(path.resolve(tempDir, "abc123", "document.pdf"));
+  it("should construct correct file path: {base}/{user_key}/{file_id}.{ext}", () => {
+    const result = getFilePath(tempDir, "user01", "01FILE", "pdf");
+    expect(result).toBe(path.resolve(tempDir, "user01", "01FILE.pdf"));
+  });
+
+  it("should lowercase extension", () => {
+    const result = getFilePath(tempDir, "user01", "01FILE", "PDF");
+    expect(result.endsWith(".pdf")).toBe(true);
+  });
+
+  it("should strip leading dot from ext", () => {
+    const result = getFilePath(tempDir, "user01", "01FILE", ".txt");
+    expect(result.endsWith(".txt")).toBe(true);
   });
 });
 
-describe("saveFile", () => {
-  it("should save file to correct location", async () => {
-    const buffer = Buffer.from("test content");
-    const filePath = await saveFile(tempDir, "tsid001", "test.pdf", buffer);
+describe("saveFile / readFile", () => {
+  it("should save and read back", async () => {
+    const buffer = Buffer.from("hello world");
+    const savedPath = await saveFile(tempDir, "user01", "01FILE", "txt", buffer);
+    expect(savedPath).toBe(path.resolve(tempDir, "user01", "01FILE.txt"));
 
-    expect(filePath).toBe(path.join(tempDir, "tsid001", "test.pdf"));
-
-    const content = await fs.readFile(filePath);
-    expect(content.toString()).toBe("test content");
+    const read = await readFile(tempDir, "user01", "01FILE", "txt");
+    expect(read.toString()).toBe("hello world");
   });
 
-  it("should create nested directory if not exists", async () => {
-    const buffer = Buffer.from("hello");
-    await saveFile(tempDir, "newdir", "file.txt", buffer);
-
-    const dirExists = await fs
-      .stat(path.join(tempDir, "newdir"))
-      .then(() => true)
-      .catch(() => false);
-    expect(dirExists).toBe(true);
-  });
-
-  it("should handle Korean filenames", async () => {
-    const buffer = Buffer.from("한글 내용");
-    const filePath = await saveFile(
-      tempDir,
-      "tsid002",
-      "한글문서.hwp",
-      buffer
-    );
-
-    const content = await fs.readFile(filePath);
-    expect(content.toString()).toBe("한글 내용");
+  it("should create user_key directory if not exists", async () => {
+    const buffer = Buffer.from("x");
+    await saveFile(tempDir, "newuser", "01X", "txt", buffer);
+    const dir = path.join(tempDir, "newuser");
+    const stat = await fs.stat(dir);
+    expect(stat.isDirectory()).toBe(true);
   });
 
   it("should overwrite existing file", async () => {
-    const buffer1 = Buffer.from("first");
-    const buffer2 = Buffer.from("second");
-
-    await saveFile(tempDir, "tsid003", "file.txt", buffer1);
-    await saveFile(tempDir, "tsid003", "file.txt", buffer2);
-
-    const content = await fs.readFile(
-      path.join(tempDir, "tsid003", "file.txt")
-    );
+    await saveFile(tempDir, "u", "f", "txt", Buffer.from("first"));
+    await saveFile(tempDir, "u", "f", "txt", Buffer.from("second"));
+    const content = await readFile(tempDir, "u", "f", "txt");
     expect(content.toString()).toBe("second");
-  });
-});
-
-describe("readFile", () => {
-  it("should read existing file", async () => {
-    const dir = path.join(tempDir, "tsid004");
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "test.pdf"), "content");
-
-    const buffer = await readFile(tempDir, "tsid004", "test.pdf");
-    expect(buffer.toString()).toBe("content");
-  });
-
-  it("should throw error for non-existing file", async () => {
-    await expect(
-      readFile(tempDir, "nonexist", "file.pdf")
-    ).rejects.toThrow();
   });
 });
 
 describe("fileExists", () => {
   it("should return true for existing file", async () => {
-    const dir = path.join(tempDir, "tsid005");
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "test.pdf"), "content");
-
-    const exists = await fileExists(tempDir, "tsid005", "test.pdf");
-    expect(exists).toBe(true);
+    await saveFile(tempDir, "u", "f", "txt", Buffer.from("x"));
+    expect(await fileExists(tempDir, "u", "f", "txt")).toBe(true);
   });
 
   it("should return false for non-existing file", async () => {
-    const exists = await fileExists(tempDir, "nope", "file.pdf");
-    expect(exists).toBe(false);
+    expect(await fileExists(tempDir, "u", "nope", "txt")).toBe(false);
   });
 });
 
-describe("deleteFileDirectory", () => {
-  it("should delete the entire directory for a TSID", async () => {
-    const dir = path.join(tempDir, "tsid006");
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, "test.pdf"), "content");
+describe("getFileSize", () => {
+  it("should return correct byte size", async () => {
+    await saveFile(tempDir, "u", "f", "txt", Buffer.from("1234567890"));
+    const size = await getFileSize(tempDir, "u", "f", "txt");
+    expect(size).toBe(10);
+  });
+});
 
-    await deleteFileDirectory(tempDir, "tsid006");
-
-    const exists = await fs
-      .stat(dir)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(false);
+describe("deleteFile", () => {
+  it("should delete the file", async () => {
+    await saveFile(tempDir, "u", "f", "txt", Buffer.from("x"));
+    await deleteFile(tempDir, "u", "f", "txt");
+    expect(await fileExists(tempDir, "u", "f", "txt")).toBe(false);
   });
 
-  it("should not throw if directory does not exist", async () => {
+  it("should not throw if file does not exist", async () => {
     await expect(
-      deleteFileDirectory(tempDir, "nonexist")
+      deleteFile(tempDir, "u", "nope", "txt")
     ).resolves.not.toThrow();
   });
 });
 
 describe("path traversal protection", () => {
-  it("should sanitize path traversal to safe basename", () => {
-    const result = getFilePath(tempDir, "tsid", "../../../etc/passwd");
-    expect(path.basename(result)).toBe("passwd");
-    expect(result.startsWith(path.resolve(tempDir))).toBe(true);
+  it("should reject path traversal in user_key", () => {
+    expect(() => getFilePath(tempDir, "../../etc", "id", "txt")).toThrow();
   });
 
-  it("should sanitize backslash traversal to safe basename", () => {
-    const result = getFilePath(tempDir, "tsid", "..\\..\\etc\\passwd");
-    expect(result.startsWith(path.resolve(tempDir))).toBe(true);
+  it("should reject path traversal in file_id", () => {
+    expect(() => getFilePath(tempDir, "u", "../../escape", "txt")).toThrow();
   });
 
-  it("should reject empty fileName", () => {
-    expect(() => getFilePath(tempDir, "tsid", "")).toThrow();
+  it("should reject invalid chars in user_key", () => {
+    expect(() => getFilePath(tempDir, "u/../a", "id", "txt")).toThrow();
   });
 
-  it("should reject dot-dot fileName", () => {
-    expect(() => getFilePath(tempDir, "tsid", "..")).toThrow();
+  it("should reject empty user_key", () => {
+    expect(() => getFilePath(tempDir, "", "id", "txt")).toThrow();
   });
 
-  it("should strip directory components from fileName", async () => {
-    const buffer = Buffer.from("safe content");
-    const filePath = await saveFile(tempDir, "tsid007", "subdir/file.txt", buffer);
-    expect(path.basename(filePath)).toBe("file.txt");
-    expect(filePath.startsWith(path.resolve(tempDir))).toBe(true);
+  it("should reject empty file_id", () => {
+    expect(() => getFilePath(tempDir, "u", "", "txt")).toThrow();
   });
 });

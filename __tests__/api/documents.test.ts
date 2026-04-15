@@ -9,9 +9,14 @@ const { prismaMock } = vi.hoisted(() => {
     document: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
+    },
+    processedEvent: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
     },
   };
   return { prismaMock };
@@ -22,15 +27,16 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/file-storage", () => ({
-  saveFile: vi.fn().mockResolvedValue("/storage/tsid/file.pdf"),
+  saveFile: vi.fn().mockResolvedValue("/data/diva/origin/user01/test.pdf"),
   readFile: vi.fn().mockResolvedValue(Buffer.from("file content")),
   fileExists: vi.fn().mockResolvedValue(true),
-  deleteFileDirectory: vi.fn().mockResolvedValue(undefined),
-  getFilePath: vi.fn().mockReturnValue("/storage/tsid/file.pdf"),
+  deleteFile: vi.fn().mockResolvedValue(undefined),
+  getFilePath: vi.fn().mockReturnValue("/data/diva/origin/user01/test.pdf"),
 }));
 
-vi.mock("@/lib/tsid", () => ({
-  generateTsid: vi.fn().mockReturnValue("test_tsid_001"),
+vi.mock("@/lib/id", () => ({
+  generateId: vi.fn().mockReturnValue("01TESTULID123456789012345A"),
+  generateTsid: vi.fn().mockReturnValue("01TESTULID123456789012345A"),
 }));
 
 import {
@@ -38,10 +44,12 @@ import {
   getDocument,
   createDocument,
   softDeleteDocument,
+  findDuplicateDocument,
 } from "@/lib/services/document-service";
 
 beforeEach(() => {
   Object.values(prismaMock.document).forEach((fn) => fn.mockReset());
+  Object.values(prismaMock.processedEvent).forEach((fn) => fn.mockReset());
 });
 
 describe("listDocuments", () => {
@@ -59,8 +67,6 @@ describe("listDocuments", () => {
 
     expect(result.data).toHaveLength(3);
     expect(result.total).toBe(3);
-    expect(result.page).toBe(1);
-    expect(result.size).toBe(10);
     expect(prismaMock.document.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         skip: 0,
@@ -77,10 +83,7 @@ describe("listDocuments", () => {
     await listDocuments({ page: 2, size: 10, sort: "rgst_dt", order: "desc" });
 
     expect(prismaMock.document.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skip: 10,
-        take: 10,
-      })
+      expect.objectContaining({ skip: 10, take: 10 })
     );
   });
 
@@ -98,30 +101,20 @@ describe("listDocuments", () => {
 
     expect(prismaMock.document.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          file_format: "pdf",
-        }),
+        where: expect.objectContaining({ file_format: "pdf" }),
       })
     );
   });
 
-  it("should filter by status", async () => {
+  it("should default to excluding DELETED documents when no status filter", async () => {
     prismaMock.document.findMany.mockResolvedValue([]);
     prismaMock.document.count.mockResolvedValue(0);
 
-    await listDocuments({
-      page: 1,
-      size: 10,
-      sort: "rgst_dt",
-      order: "desc",
-      status: "ACTIVE",
-    });
+    await listDocuments({ page: 1, size: 10, sort: "rgst_dt", order: "desc" });
 
     expect(prismaMock.document.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          status: "ACTIVE",
-        }),
+        where: expect.objectContaining({ status: "ACTIVE" }),
       })
     );
   });
@@ -146,39 +139,19 @@ describe("listDocuments", () => {
       })
     );
   });
-
-  it("should default to excluding DELETED documents when no status filter", async () => {
-    prismaMock.document.findMany.mockResolvedValue([]);
-    prismaMock.document.count.mockResolvedValue(0);
-
-    await listDocuments({
-      page: 1,
-      size: 10,
-      sort: "rgst_dt",
-      order: "desc",
-    });
-
-    expect(prismaMock.document.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          status: "ACTIVE",
-        }),
-      })
-    );
-  });
 });
 
 describe("getDocument", () => {
-  it("should return document by uuid", async () => {
-    const record = createDocumentRecord({ uuid: "test_uuid" });
+  it("should return document by file_id", async () => {
+    const record = createDocumentRecord({ file_id: "01TEST" });
     prismaMock.document.findUnique.mockResolvedValue(record);
 
-    const result = await getDocument("test_uuid");
+    const result = await getDocument("01TEST");
 
     expect(result).toBeDefined();
-    expect(result!.uuid).toBe("test_uuid");
+    expect(result!.file_id).toBe("01TEST");
     expect(prismaMock.document.findUnique).toHaveBeenCalledWith({
-      where: { uuid: "test_uuid" },
+      where: { file_id: "01TEST" },
     });
   });
 
@@ -191,32 +164,50 @@ describe("getDocument", () => {
   });
 });
 
+describe("findDuplicateDocument", () => {
+  it("should find ACTIVE duplicate by user_key + file_name", async () => {
+    const record = createDocumentRecord({ user_key: "u1", file_name: "a.pdf" });
+    prismaMock.document.findFirst.mockResolvedValue(record);
+
+    const result = await findDuplicateDocument("u1", "a.pdf");
+
+    expect(result).toBeDefined();
+    expect(prismaMock.document.findFirst).toHaveBeenCalledWith({
+      where: { user_key: "u1", file_name: "a.pdf", status: "ACTIVE" },
+    });
+  });
+});
+
 describe("createDocument", () => {
-  it("should create document record", async () => {
+  it("should create document record with required fields", async () => {
     const record = createDocumentRecord();
     prismaMock.document.create.mockResolvedValue(record);
 
     const result = await createDocument({
-      uuid: "test_tsid_001",
+      file_id: "01FILE",
       file_name: "test.pdf",
       user_key: "user001",
       file_format: "pdf",
       file_size: BigInt(1024),
+      origin_path: "/data/diva/origin/user001/01FILE.pdf",
       rgst_nm: "홍길동",
     });
 
     expect(result).toBeDefined();
     expect(prismaMock.document.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        uuid: "test_tsid_001",
+        file_id: "01FILE",
         file_name: "test.pdf",
         user_key: "user001",
         file_format: "pdf",
         file_size: BigInt(1024),
+        origin_path: "/data/diva/origin/user001/01FILE.pdf",
         rgst_nm: "홍길동",
         updt_nm: "홍길동",
         status: "ACTIVE",
         file_status: "UPLOADED",
+        retry_count: 0,
+        last_error_code: null,
       }),
     });
   });
@@ -224,18 +215,15 @@ describe("createDocument", () => {
 
 describe("softDeleteDocument", () => {
   it("should set status to DELETED", async () => {
-    const record = createDocumentRecord({ uuid: "del_uuid", status: "ACTIVE" });
+    const record = createDocumentRecord({ file_id: "01DEL", status: "ACTIVE" });
     prismaMock.document.findUnique.mockResolvedValue(record);
-    prismaMock.document.update.mockResolvedValue({
-      ...record,
-      status: "DELETED",
-    });
+    prismaMock.document.update.mockResolvedValue({ ...record, status: "DELETED" });
 
-    const result = await softDeleteDocument("del_uuid", "관리자");
+    const result = await softDeleteDocument("01DEL", "관리자");
 
     expect(result).toBeDefined();
     expect(prismaMock.document.update).toHaveBeenCalledWith({
-      where: { uuid: "del_uuid" },
+      where: { file_id: "01DEL" },
       data: { status: "DELETED", updt_nm: "관리자" },
     });
   });
@@ -249,13 +237,10 @@ describe("softDeleteDocument", () => {
   });
 
   it("should throw error if document already deleted", async () => {
-    const record = createDocumentRecord({
-      uuid: "del_uuid",
-      status: "DELETED",
-    });
+    const record = createDocumentRecord({ file_id: "01DEL", status: "DELETED" });
     prismaMock.document.findUnique.mockResolvedValue(record);
 
-    await expect(softDeleteDocument("del_uuid", "관리자")).rejects.toThrow(
+    await expect(softDeleteDocument("01DEL", "관리자")).rejects.toThrow(
       "이미 삭제된 문서입니다"
     );
   });

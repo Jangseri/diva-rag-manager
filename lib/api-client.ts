@@ -94,7 +94,7 @@ export async function deleteDocument(
 
 export async function deleteDocumentsBulk(
   ids: string[]
-): Promise<{ success: string[]; failed: { uuid: string; error: string }[] }> {
+): Promise<{ success: string[]; failed: { file_id: string; error: string }[] }> {
   return fetchApi(`/api/documents/bulk-delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

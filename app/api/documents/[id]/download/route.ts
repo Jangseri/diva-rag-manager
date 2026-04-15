@@ -25,12 +25,12 @@ export async function GET(
     if (!doc) {
       return errorResponse("문서를 찾을 수 없습니다", 404);
     }
-
     if (doc.status === "DELETED") {
       return errorResponse("삭제된 문서는 다운로드할 수 없습니다", 410);
     }
 
-    const exists = await fileExists(ORIGIN_PATH, doc.uuid, doc.file_name);
+    const ext = doc.file_format;
+    const exists = await fileExists(ORIGIN_PATH, doc.user_key, doc.file_id, ext);
     if (!exists) {
       return errorResponse(
         "파일이 스토리지에 존재하지 않습니다. 관리자에게 문의해주세요.",
@@ -38,8 +38,8 @@ export async function GET(
       );
     }
 
-    const fileSize = await getFileSize(ORIGIN_PATH, doc.uuid, doc.file_name);
-    const stream = createFileReadStream(ORIGIN_PATH, doc.uuid, doc.file_name);
+    const fileSize = await getFileSize(ORIGIN_PATH, doc.user_key, doc.file_id, ext);
+    const stream = createFileReadStream(ORIGIN_PATH, doc.user_key, doc.file_id, ext);
     const mimeType =
       ALLOWED_MIME_TYPES[doc.file_format] || "application/octet-stream";
     const encodedFileName = encodeURIComponent(doc.file_name);

@@ -1,7 +1,7 @@
 import { getRedisSubscriber } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
-import { STREAMS } from "./event-publisher";
+import { STREAMS, publishDocumentUploaded } from "./event-publisher";
 import os from "os";
 
 const log = createLogger("event-consumer");
@@ -10,25 +10,60 @@ const CONSUMER_GROUP = "cg:rag-manager";
 const CONSUMER_NAME = `rag-manager-${os.hostname()}-${process.pid}`;
 const DLQ_STREAM = `${STREAMS.EXTRACT}:dlq`;
 
-// 재처리 설정
-const IDLE_MS = 60_000; // pending 60초 이상이면 재클레임
-const CLAIM_INTERVAL_MS = 30_000; // 30초마다 XAUTOCLAIM
-const MAX_DELIVERY_COUNT = 5; // 5회 실패 시 DLQ로 이동
+const IDLE_MS = 60_000;
+const CLAIM_INTERVAL_MS = 30_000;
+const MAX_DELIVERY_COUNT = 5;
+const MAX_RETRY = 3;
 
-interface ExtractEvent {
-  event: "EXTRACT_STARTED" | "EXTRACT_COMPLETED" | "EXTRACT_FAILED";
-  uuid: string;
+interface ExtractStartedEvent {
+  event_id: string;
+  event_type: "EXTRACT_STARTED";
+  schema_version: string;
   timestamp: string;
-  error_message?: string;
+  file_id: string;
+  user_key: string;
 }
+
+interface ExtractCompletedEvent {
+  event_id: string;
+  event_type: "EXTRACT_COMPLETED";
+  schema_version: string;
+  timestamp: string;
+  file_id: string;
+  user_key: string;
+  collection_name?: string | null;
+  file_name?: string;
+  file_type?: string;
+  output_path?: string;
+  redis_key?: string;
+}
+
+interface ExtractFailedEvent {
+  event_id: string;
+  event_type: "EXTRACT_FAILED";
+  schema_version: string;
+  timestamp: string;
+  file_id: string;
+  user_key: string;
+  error_code: string;
+  error_message: string;
+  retryable: boolean;
+}
+
+type ExtractEvent =
+  | ExtractStartedEvent
+  | ExtractCompletedEvent
+  | ExtractFailedEvent;
 
 let running = false;
 let claimTimer: NodeJS.Timeout | null = null;
 
+// -------------------- 내부 유틸 --------------------
+
 async function ensureConsumerGroup() {
   const client = getRedisSubscriber();
   try {
-    await client.xgroup("CREATE", STREAMS.EXTRACT, CONSUMER_GROUP, "0", "MKSTREAM");
+    await client.xgroup("CREATE", STREAMS.EXTRACT, CONSUMER_GROUP, "$", "MKSTREAM");
     log.info({ stream: STREAMS.EXTRACT, group: CONSUMER_GROUP }, "Consumer Group 생성");
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
@@ -40,52 +75,156 @@ async function ensureConsumerGroup() {
   }
 }
 
-async function updateFileStatus(uuid: string, status: string): Promise<boolean> {
+async function isAlreadyProcessed(event_id: string): Promise<boolean> {
+  const exists = await prisma.processedEvent.findUnique({
+    where: { event_id },
+    select: { event_id: true },
+  });
+  return exists !== null;
+}
+
+async function markProcessed(
+  event_id: string,
+  event_type: string,
+  file_id: string | null
+): Promise<void> {
+  await prisma.processedEvent
+    .create({
+      data: { event_id, event_type, file_id },
+    })
+    .catch((e) => {
+      // 유니크 제약 충돌은 이미 처리됐다는 의미
+      if (!String(e).includes("Unique constraint")) throw e;
+    });
+}
+
+async function updateFileStatus(
+  file_id: string,
+  file_status: string,
+  extra?: { last_error_code?: string | null; retry_count?: number }
+): Promise<boolean> {
   try {
     const result = await prisma.document.updateMany({
-      where: { uuid },
-      data: { file_status: status, updt_nm: "docs-extract-system" },
+      where: { file_id },
+      data: {
+        file_status,
+        updt_nm: "docs-extract-system",
+        ...extra,
+      },
     });
     if (result.count === 0) {
-      log.warn({ uuid, status }, "DB에 존재하지 않는 문서 (이벤트 무시)");
-      return true; // 문서가 없으면 ACK 처리 (재시도 의미 없음)
+      log.warn({ file_id, file_status }, "DB에 없는 문서 (이벤트 무시)");
+      return true;
     }
-    log.info({ uuid, status }, "file_status 업데이트");
+    log.info({ file_id, file_status, ...extra }, "file_status 업데이트");
     return true;
   } catch (err) {
-    log.error({ err, uuid, status }, "file_status 업데이트 실패");
+    log.error({ err, file_id, file_status }, "file_status 업데이트 실패");
     return false;
   }
 }
 
+// -------------------- 이벤트 타입별 처리 --------------------
+
+async function handleExtractStarted(event: ExtractStartedEvent): Promise<boolean> {
+  return updateFileStatus(event.file_id, "PROCESSING");
+}
+
+async function handleExtractCompleted(event: ExtractCompletedEvent): Promise<boolean> {
+  return updateFileStatus(event.file_id, "EXTRACTED", { last_error_code: null });
+}
+
+async function handleExtractFailed(event: ExtractFailedEvent): Promise<boolean> {
+  const { file_id, retryable, error_code, error_message } = event;
+
+  const doc = await prisma.document.findUnique({ where: { file_id } });
+  if (!doc) {
+    log.warn({ file_id }, "DB에 없는 문서 (FAILED 이벤트 무시)");
+    return true;
+  }
+
+  log.warn({ file_id, error_code, error_message, retryable }, "추출 실패 수신");
+
+  // retryable + 재시도 여력 있음 → 재발행
+  if (retryable && doc.retry_count < MAX_RETRY) {
+    const newRetryCount = doc.retry_count + 1;
+    log.info(
+      { file_id, retry_count: newRetryCount, max: MAX_RETRY },
+      "재시도 이벤트 재발행"
+    );
+
+    // DB 상태: 재시도 중임을 기록 (PROCESSING 복귀 + retry_count 증가)
+    await updateFileStatus(file_id, "PROCESSING", {
+      last_error_code: error_code,
+      retry_count: newRetryCount,
+    });
+
+    // DOCUMENT_UPLOADED 재발행
+    if (doc.origin_path) {
+      await publishDocumentUploaded({
+        file_id: doc.file_id,
+        user_key: doc.user_key,
+        collection_name: doc.collection_name,
+        file_name: doc.file_name,
+        file_type: doc.file_format,
+        file_size: Number(doc.file_size),
+        origin_path: doc.origin_path,
+      });
+    } else {
+      log.error({ file_id }, "origin_path 없어 재발행 불가 → FAILED 고정");
+      await updateFileStatus(file_id, "FAILED", {
+        last_error_code: error_code,
+      });
+    }
+    return true;
+  }
+
+  // retryable=false 또는 재시도 한도 초과 → 영구 FAILED
+  await updateFileStatus(file_id, "FAILED", {
+    last_error_code: error_code,
+  });
+  return true;
+}
+
 async function processEvent(event: ExtractEvent): Promise<boolean> {
-  switch (event.event) {
+  switch (event.event_type) {
     case "EXTRACT_STARTED":
-      return updateFileStatus(event.uuid, "PROCESSING");
+      return handleExtractStarted(event);
     case "EXTRACT_COMPLETED":
-      return updateFileStatus(event.uuid, "EXTRACTED");
+      return handleExtractCompleted(event);
     case "EXTRACT_FAILED":
-      log.warn({ uuid: event.uuid, reason: event.error_message }, "추출 실패 수신");
-      return updateFileStatus(event.uuid, "FAILED");
+      return handleExtractFailed(event);
     default:
-      log.warn({ event }, "알 수 없는 이벤트 타입");
-      return true; // 모르는 이벤트는 ACK (스트림 막히지 않게)
+      log.warn({ event }, "알 수 없는 event_type (ACK 후 무시)");
+      return true;
   }
 }
 
-async function handleMessage(
-  msgId: string,
-  fields: string[]
-): Promise<boolean> {
+async function handleMessage(msgId: string, fields: string[]): Promise<boolean> {
   try {
-    // fields = ["data", "<json>"]
     const dataIdx = fields.indexOf("data");
     if (dataIdx === -1 || !fields[dataIdx + 1]) {
       log.warn({ msgId, fields }, "data 필드 없음");
       return true;
     }
     const event: ExtractEvent = JSON.parse(fields[dataIdx + 1]);
-    return await processEvent(event);
+
+    if (!event.event_id || !event.event_type || !event.file_id) {
+      log.warn({ msgId, event }, "필수 필드 누락 (ACK 후 스킵)");
+      return true;
+    }
+
+    // 멱등성 체크
+    if (await isAlreadyProcessed(event.event_id)) {
+      log.debug({ event_id: event.event_id, event_type: event.event_type }, "중복 이벤트 스킵");
+      return true;
+    }
+
+    const success = await processEvent(event);
+    if (success) {
+      await markProcessed(event.event_id, event.event_type, event.file_id);
+    }
+    return success;
   } catch (err) {
     log.error({ err, msgId }, "메시지 처리 실패");
     return false;
@@ -99,7 +238,6 @@ async function ackMessage(msgId: string): Promise<void> {
 
 async function moveToDlq(msgId: string, fields: string[]): Promise<void> {
   const client = getRedisSubscriber();
-  // DLQ에 원본 데이터 + 메타 정보 함께 저장
   const args: string[] = [];
   for (let i = 0; i < fields.length; i += 2) {
     args.push(fields[i], fields[i + 1]);
@@ -113,18 +251,19 @@ async function moveToDlq(msgId: string, fields: string[]): Promise<void> {
   log.error({ msgId, stream: DLQ_STREAM }, "DLQ로 이동");
 }
 
+// -------------------- 메인 루프 --------------------
+
 async function consumeLoop() {
   const client = getRedisSubscriber();
 
   while (running) {
     try {
-      // XREADGROUP BLOCK 5000 COUNT 10 STREAMS rag:extract >
       const result = (await client.xreadgroup(
         "GROUP",
         CONSUMER_GROUP,
         CONSUMER_NAME,
         "COUNT",
-        10,
+        16,
         "BLOCK",
         5000,
         "STREAMS",
@@ -140,7 +279,6 @@ async function consumeLoop() {
           if (success) {
             await ackMessage(msgId);
           }
-          // 실패 시 ACK 안 함 → pending 상태로 남음 → XAUTOCLAIM이 재처리
         }
       }
     } catch (err) {
@@ -154,24 +292,21 @@ async function consumeLoop() {
 async function claimPending() {
   const client = getRedisSubscriber();
   try {
-    // XAUTOCLAIM rag:extract cg:rag-manager consumer_name 60000 0 COUNT 10
     const result = (await client.xautoclaim(
       STREAMS.EXTRACT,
       CONSUMER_GROUP,
       CONSUMER_NAME,
       IDLE_MS,
-      "0",
+      "0-0",
       "COUNT",
-      10
+      16
     )) as [string, [string, string[]][], string[]] | null;
 
     if (!result) return;
-
     const [, claimed] = result;
     if (!claimed || claimed.length === 0) return;
 
     for (const [msgId, fields] of claimed) {
-      // delivery_count 확인: XPENDING으로 조회
       const pending = (await client.xpending(
         STREAMS.EXTRACT,
         CONSUMER_GROUP,
@@ -211,16 +346,21 @@ export async function startConsumer() {
     await ensureConsumerGroup();
     running = true;
 
-    // 메인 소비 루프 (non-blocking)
-    consumeLoop().catch((err) => log.error({ err }, "Consumer 루프 비정상 종료"));
+    consumeLoop().catch((err) =>
+      log.error({ err }, "Consumer 루프 비정상 종료")
+    );
 
-    // 주기적 재클레임
     claimTimer = setInterval(() => {
       claimPending().catch((err) => log.error({ err }, "주기 재클레임 실패"));
     }, CLAIM_INTERVAL_MS);
 
     log.info(
-      { idleMs: IDLE_MS, intervalMs: CLAIM_INTERVAL_MS, maxDelivery: MAX_DELIVERY_COUNT },
+      {
+        idleMs: IDLE_MS,
+        intervalMs: CLAIM_INTERVAL_MS,
+        maxDelivery: MAX_DELIVERY_COUNT,
+        maxRetry: MAX_RETRY,
+      },
       "Consumer 초기화 완료"
     );
   } catch (err) {

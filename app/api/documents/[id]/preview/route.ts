@@ -11,47 +11,45 @@ import { createLogger } from "@/lib/logger";
 
 const log = createLogger("api/documents/[id]/preview");
 
-const MAX_PREVIEW_BYTES = 500 * 1024; // 500KB
+const MAX_PREVIEW_BYTES = 500 * 1024;
 
-// TXT는 원본을 그대로 읽고, 나머지는 extract 결과를 읽음
+/**
+ * 경로 규칙:
+ *   TXT: /data/diva/origin/{user_key}/{file_id}.txt → 원본 읽기
+ *   기타: /data/diva/extract/{user_key}/{file_name}.json → docs-extract-system 결과
+ */
 async function getPreviewContent(
   format: string,
-  uuid: string,
-  fileName: string
+  user_key: string,
+  file_id: string,
+  file_name: string
 ): Promise<{ content: string; truncated: boolean } | null> {
   if (format === "txt") {
-    const exists = await fileExists(ORIGIN_PATH, uuid, fileName);
+    const exists = await fileExists(ORIGIN_PATH, user_key, file_id, format);
     if (!exists) return null;
-
-    const buffer = await readFile(ORIGIN_PATH, uuid, fileName);
+    const buffer = await readFile(ORIGIN_PATH, user_key, file_id, format);
     const truncated = buffer.length > MAX_PREVIEW_BYTES;
     const content = buffer.subarray(0, MAX_PREVIEW_BYTES).toString("utf-8");
     return { content, truncated };
   }
 
-  // PDF, DOCX, HWP, XLSX, PPTX → docs-extract-system이 추출한 결과 읽기
-  const extractDir = path.resolve(EXTRACT_PATH, uuid);
+  // 추출 결과 경로: EXTRACT_PATH/{user_key}/{file_name}.json
+  const extractPath = path.resolve(EXTRACT_PATH, user_key, `${file_name}.json`);
   try {
-    const entries = await fs.readdir(extractDir);
-    // 텍스트류 확장자 우선 탐색
-    const textFile = entries.find((f) =>
-      /\.(txt|json|md)$/i.test(f)
-    );
-    if (!textFile) return null;
+    const stat = await fs.stat(extractPath);
+    const fd = await fs.open(extractPath, "r");
+    const bufSize = Math.min(stat.size, MAX_PREVIEW_BYTES);
+    const buf = Buffer.alloc(bufSize);
+    await fd.read(buf, 0, bufSize, 0);
+    await fd.close();
+    const truncated = stat.size > MAX_PREVIEW_BYTES;
+    let content = buf.toString("utf-8");
 
-    const buffer = await readFile(EXTRACT_PATH, uuid, textFile);
-    const truncated = buffer.length > MAX_PREVIEW_BYTES;
-    let content = buffer.subarray(0, MAX_PREVIEW_BYTES).toString("utf-8");
-
-    // JSON이면 보기 좋게 포맷
-    if (textFile.endsWith(".json")) {
-      try {
-        content = JSON.stringify(JSON.parse(content), null, 2);
-      } catch {
-        // 파싱 실패 시 원문 유지
-      }
+    try {
+      content = JSON.stringify(JSON.parse(content), null, 2);
+    } catch {
+      // JSON 아니면 원문 유지
     }
-
     return { content, truncated };
   } catch {
     return null;
@@ -69,13 +67,16 @@ export async function GET(
     if (!doc) {
       return errorResponse("문서를 찾을 수 없습니다", 404);
     }
-
     if (doc.status === "DELETED") {
       return errorResponse("삭제된 문서는 미리볼 수 없습니다", 410);
     }
 
     // TXT 외 형식은 추출 완료 상태여야 미리보기 가능
-    if (doc.file_format !== "txt" && doc.file_status !== "EXTRACTED") {
+    if (
+      doc.file_format !== "txt" &&
+      doc.file_status !== "EXTRACTED" &&
+      doc.file_status !== "INDEXED"
+    ) {
       return NextResponse.json({
         previewable: false,
         reason:
@@ -86,8 +87,12 @@ export async function GET(
       });
     }
 
-    const result = await getPreviewContent(doc.file_format, doc.uuid, doc.file_name);
-
+    const result = await getPreviewContent(
+      doc.file_format,
+      doc.user_key,
+      doc.file_id,
+      doc.file_name
+    );
     if (!result) {
       return NextResponse.json({
         previewable: false,

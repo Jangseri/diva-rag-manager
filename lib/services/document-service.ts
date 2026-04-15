@@ -10,11 +10,13 @@ interface ListResult {
 }
 
 interface CreateDocumentInput {
-  uuid: string;
+  file_id: string;
   file_name: string;
   user_key: string;
   file_format: string;
   file_size: bigint;
+  origin_path: string;
+  collection_name?: string | null;
   rgst_nm: string;
 }
 
@@ -24,18 +26,14 @@ export async function listDocuments(
   const { page, size, sort, order, search, format, status, file_status } = query;
 
   const where: Record<string, unknown> = {};
-
-  // Default to ACTIVE if no status filter
   where.status = status || "ACTIVE";
 
   if (file_status) {
     where.file_status = file_status;
   }
-
   if (format) {
     where.file_format = format;
   }
-
   if (search) {
     where.file_name = { contains: search };
   }
@@ -54,30 +52,10 @@ export async function listDocuments(
 }
 
 export async function getDocument(
-  uuid: string
+  file_id: string
 ): Promise<DocumentRecord | null> {
-  const doc = await prisma.document.findUnique({ where: { uuid } });
+  const doc = await prisma.document.findUnique({ where: { file_id } });
   return doc as DocumentRecord | null;
-}
-
-export async function createDocument(
-  input: CreateDocumentInput
-): Promise<DocumentRecord> {
-  const doc = await prisma.document.create({
-    data: {
-      uuid: input.uuid,
-      file_name: input.file_name,
-      user_key: input.user_key,
-      file_format: input.file_format,
-      file_size: input.file_size,
-      file_status: "UPLOADED",
-      rgst_nm: input.rgst_nm,
-      status: "ACTIVE",
-      updt_nm: input.rgst_nm,
-    },
-  });
-
-  return doc as DocumentRecord;
 }
 
 export async function findDuplicateDocument(
@@ -94,24 +72,45 @@ export async function findDuplicateDocument(
   return doc as DocumentRecord | null;
 }
 
+export async function createDocument(
+  input: CreateDocumentInput
+): Promise<DocumentRecord> {
+  const doc = await prisma.document.create({
+    data: {
+      file_id: input.file_id,
+      file_name: input.file_name,
+      user_key: input.user_key,
+      file_format: input.file_format,
+      file_size: input.file_size,
+      file_status: "UPLOADED",
+      collection_name: input.collection_name ?? null,
+      origin_path: input.origin_path,
+      retry_count: 0,
+      last_error_code: null,
+      rgst_nm: input.rgst_nm,
+      status: "ACTIVE",
+      updt_nm: input.rgst_nm,
+    },
+  });
+  return doc as DocumentRecord;
+}
+
 export async function softDeleteDocument(
-  uuid: string,
+  file_id: string,
   updt_nm: string
 ): Promise<DocumentRecord> {
-  const existing = await prisma.document.findUnique({ where: { uuid } });
+  const existing = await prisma.document.findUnique({ where: { file_id } });
 
   if (!existing) {
     throw new Error("문서를 찾을 수 없습니다");
   }
-
   if (existing.status === "DELETED") {
     throw new Error("이미 삭제된 문서입니다");
   }
 
   const doc = await prisma.document.update({
-    where: { uuid },
+    where: { file_id },
     data: { status: "DELETED", updt_nm },
   });
-
   return doc as DocumentRecord;
 }

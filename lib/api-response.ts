@@ -3,12 +3,16 @@ import type { DocumentRecord, DocumentResponse } from "@/types";
 
 export function toDocumentResponse(doc: DocumentRecord): DocumentResponse {
   return {
-    uuid: doc.uuid,
+    file_id: doc.file_id,
     file_name: doc.file_name,
     user_key: doc.user_key,
     file_format: doc.file_format,
-    file_status: doc.file_status,
     file_size: doc.file_size.toString(),
+    file_status: doc.file_status,
+    collection_name: doc.collection_name,
+    origin_path: doc.origin_path,
+    retry_count: doc.retry_count,
+    last_error_code: doc.last_error_code,
     rgst_dt: doc.rgst_dt.toISOString(),
     rgst_nm: doc.rgst_nm,
     status: doc.status,

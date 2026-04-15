@@ -86,7 +86,7 @@ export default function DocumentDetailPage({
     if (!document) return;
     setIsDeleting(true);
     try {
-      await deleteDocument(document.uuid);
+      await deleteDocument(document.file_id);
       toast.success("문서가 삭제되었습니다");
       router.push("/documents");
     } catch (error) {
@@ -136,7 +136,7 @@ export default function DocumentDetailPage({
                 size="sm"
                 className="gap-1.5"
                 onClick={() =>
-                  window.open(getDownloadUrl(document.uuid), "_blank")
+                  window.open(getDownloadUrl(document.file_id), "_blank")
                 }
                 disabled={document.status === "DELETED"}
               >

@@ -1,7 +1,13 @@
 export const FILE_FORMATS = ["pdf", "docx", "txt", "hwp", "xlsx", "pptx"] as const;
 export type FileFormat = (typeof FILE_FORMATS)[number];
 
-export const FILE_STATUSES = ["UPLOADED", "PROCESSING", "EXTRACTED", "FAILED"] as const;
+export const FILE_STATUSES = [
+  "UPLOADED",
+  "PROCESSING",
+  "EXTRACTED",
+  "INDEXED",
+  "FAILED",
+] as const;
 export type FileStatus = (typeof FILE_STATUSES)[number];
 
 export const DOCUMENT_STATUSES = ["ACTIVE", "DELETED"] as const;
@@ -11,12 +17,16 @@ export const SEARCH_METHODS = ["bm25", "vector", "hybrid"] as const;
 export type SearchMethod = (typeof SEARCH_METHODS)[number];
 
 export interface DocumentRecord {
-  uuid: string;
+  file_id: string;
   file_name: string;
   user_key: string;
   file_format: string;
-  file_status: string;
   file_size: bigint;
+  file_status: string;
+  collection_name: string | null;
+  origin_path: string | null;
+  retry_count: number;
+  last_error_code: string | null;
   rgst_dt: Date;
   rgst_nm: string;
   status: string;
@@ -32,12 +42,16 @@ export interface DocumentListResponse {
 }
 
 export interface DocumentResponse {
-  uuid: string;
+  file_id: string;
   file_name: string;
   user_key: string;
   file_format: string;
-  file_status: string;
   file_size: string;
+  file_status: string;
+  collection_name: string | null;
+  origin_path: string | null;
+  retry_count: number;
+  last_error_code: string | null;
   rgst_dt: string;
   rgst_nm: string;
   status: string;

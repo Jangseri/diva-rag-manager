@@ -64,7 +64,7 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
           <div className="flex items-center gap-3">
             <FileFormatIcon format={doc.file_format} size="sm" />
             <Link
-              href={`/documents/${doc.uuid}`}
+              href={`/documents/${doc.file_id}`}
               className="truncate font-medium text-foreground hover:text-primary hover:underline"
               title={doc.file_name}
             >
@@ -134,7 +134,7 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
                 <DropdownMenuItem
-                  render={<Link href={`/documents/${doc.uuid}`} />}
+                  render={<Link href={`/documents/${doc.file_id}`} />}
                 >
                   <Eye className="mr-2 h-4 w-4" />
                   상세 보기

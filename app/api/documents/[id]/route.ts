@@ -40,12 +40,13 @@ export async function DELETE(
     const currentUser = getCurrentUser();
 
     const doc = await softDeleteDocument(id, currentUser.name);
-    log.info({ uuid: id, userKey: currentUser.user_key }, "문서 소프트 삭제");
+    log.info({ file_id: id, userKey: currentUser.user_key }, "문서 소프트 삭제");
 
     // Redis Stream에 DOCUMENT_DELETED 발행
     await publishDocumentDeleted({
-      uuid: id,
+      file_id: id,
       user_key: currentUser.user_key,
+      collection_name: doc.collection_name,
     });
 
     return NextResponse.json({

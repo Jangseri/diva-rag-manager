@@ -93,14 +93,14 @@ export default function DocumentsPage() {
   }, [search]);
 
   const handleDownload = (doc: DocumentResponse) => {
-    window.open(getDownloadUrl(doc.uuid), "_blank");
+    window.open(getDownloadUrl(doc.file_id), "_blank");
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      await deleteDocument(deleteTarget.uuid);
+      await deleteDocument(deleteTarget.file_id);
       toast.success(`"${deleteTarget.file_name}" 파일이 삭제되었습니다`);
       setDeleteTarget(null);
       loadDocuments();

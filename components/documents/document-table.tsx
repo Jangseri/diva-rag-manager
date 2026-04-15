@@ -48,7 +48,7 @@ export function DocumentTable({
         typeof updater === "function" ? updater(rowSelection) : updater;
       onRowSelectionChange(next);
     },
-    getRowId: (row) => row.uuid,
+    getRowId: (row) => row.file_id,
     getCoreRowModel: getCoreRowModel(),
   });
 

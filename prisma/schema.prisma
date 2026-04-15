@@ -9,17 +9,32 @@ datasource db {
 }
 
 model Document {
-  uuid        String   @id @db.VarChar(30)
-  file_name   String   @db.VarChar(500)
-  user_key    String   @db.VarChar(100)
-  file_format String   @db.VarChar(20)
-  file_status String   @default("UPLOADED") @db.VarChar(20)
-  file_size   BigInt   @db.BigInt
-  rgst_dt     DateTime @default(now()) @db.DateTime(0)
-  rgst_nm     String   @db.VarChar(100)
-  status      String   @default("ACTIVE") @db.VarChar(10)
-  updt_dt     DateTime @updatedAt @db.DateTime(0)
-  updt_nm     String   @db.VarChar(100)
+  file_id         String   @id @db.VarChar(26)
+  file_name       String   @db.VarChar(500)
+  user_key        String   @db.VarChar(100)
+  file_format     String   @db.VarChar(20)
+  file_size       BigInt   @db.BigInt
+  file_status     String   @default("UPLOADED") @db.VarChar(20)
+  collection_name String?  @db.VarChar(200)
+  origin_path     String?  @db.VarChar(1000)
+  retry_count     Int      @default(0)
+  last_error_code String?  @db.VarChar(50)
+  rgst_dt         DateTime @default(now()) @db.DateTime(0)
+  rgst_nm         String   @db.VarChar(100)
+  status          String   @default("ACTIVE") @db.VarChar(10)
+  updt_dt         DateTime @updatedAt @db.DateTime(0)
+  updt_nm         String   @db.VarChar(100)
 
   @@map("document_files")
+}
+
+/// 멱등성 보장용 처리된 이벤트 기록
+model ProcessedEvent {
+  event_id     String   @id @db.VarChar(30)
+  event_type   String   @db.VarChar(50)
+  file_id      String?  @db.VarChar(26)
+  processed_at DateTime @default(now()) @db.DateTime(0)
+
+  @@index([file_id])
+  @@map("processed_events")
 }

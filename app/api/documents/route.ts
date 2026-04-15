@@ -12,9 +12,9 @@ import {
   createDocument,
   findDuplicateDocument,
 } from "@/lib/services/document-service";
-import { saveFile, deleteFileDirectory } from "@/lib/file-storage";
+import { saveFile, deleteFile } from "@/lib/file-storage";
 import { ORIGIN_PATH, MAX_FILE_SIZE_BYTES } from "@/lib/constants";
-import { generateTsid } from "@/lib/tsid";
+import { generateId } from "@/lib/id";
 import {
   toDocumentResponse,
   errorResponse,
@@ -53,7 +53,6 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // #3: 서버사이드 Content-Length 사전 검증
     const contentLength = parseInt(
       request.headers.get("content-length") || "0",
       10
@@ -74,80 +73,81 @@ export async function POST(request: NextRequest) {
     const validFiles: { file: File; ext: string }[] = [];
 
     for (const file of files) {
-      // #6: 파일명 검증 (특수문자, 길이, 형식)
       const nameCheck = validateFileName(file.name);
       if (!nameCheck.valid) {
         errors.push(`${file.name}: ${nameCheck.error}`);
         continue;
       }
-
-      // #3: 서버사이드 파일 크기 재검증
       if (!validateFileSize(file.size)) {
         errors.push(`${file.name}: 파일 크기가 제한을 초과합니다 (최대 100MB)`);
         continue;
       }
-
       validFiles.push({ file, ext: getFileExtension(file.name) });
     }
 
     if (validFiles.length === 0) {
-      return validationErrorResponse("유효한 파일이 없습니다", {
-        files: errors,
-      });
+      return validationErrorResponse("유효한 파일이 없습니다", { files: errors });
     }
 
     const created = [];
 
     for (const { file, ext } of validFiles) {
-      // #10: 중복 파일 확인
       const duplicate = await findDuplicateDocument(
         currentUser.user_key,
         file.name
       );
       if (duplicate) {
         errors.push(
-          `${file.name}: 동일한 파일명이 이미 등록되어 있습니다 (${duplicate.uuid})`
+          `${file.name}: 동일한 파일명이 이미 등록되어 있습니다 (${duplicate.file_id})`
         );
         continue;
       }
 
-      const tsid = generateTsid();
-
-      // #3: arrayBuffer 변환 후 실제 크기 재확인
+      const file_id = generateId();
       const buffer = Buffer.from(await file.arrayBuffer());
       if (buffer.length > MAX_FILE_SIZE_BYTES) {
         errors.push(`${file.name}: 파일 크기가 제한을 초과합니다`);
         continue;
       }
 
-      // #2: 파일 저장 후 DB 실패 시 롤백
-      await saveFile(ORIGIN_PATH, tsid, file.name, buffer);
+      // 경로: ORIGIN_PATH/{user_key}/{file_id}.{ext}
+      const savedPath = await saveFile(
+        ORIGIN_PATH,
+        currentUser.user_key,
+        file_id,
+        ext,
+        buffer
+      );
+      const origin_path = path.resolve(savedPath);
 
       try {
         const doc = await createDocument({
-          uuid: tsid,
+          file_id,
           file_name: file.name,
           user_key: currentUser.user_key,
           file_format: ext,
           file_size: BigInt(buffer.length),
+          origin_path,
           rgst_nm: currentUser.name,
         });
 
         created.push(toDocumentResponse(doc));
 
-        // Redis Stream에 DOCUMENT_UPLOADED 발행 (docs-extract-system이 consume)
+        // Redis Stream 발행
         await publishDocumentUploaded({
-          uuid: tsid,
-          file_name: file.name,
-          file_format: ext,
-          file_path: path.join(ORIGIN_PATH, tsid, file.name),
+          file_id,
           user_key: currentUser.user_key,
+          collection_name: null,
+          file_name: file.name,
+          file_type: ext,
+          file_size: buffer.length,
+          origin_path,
         });
       } catch (dbError) {
         // DB 실패 시 저장된 파일 롤백
-        await deleteFileDirectory(ORIGIN_PATH, tsid).catch(() => {});
+        await deleteFile(ORIGIN_PATH, currentUser.user_key, file_id, ext).catch(() => {});
         log.error(
-          { err: dbError, fileName: file.name, tsid },
+          { err: dbError, fileName: file.name, file_id },
           "DB insert 실패, 파일 롤백 완료"
         );
         errors.push(`${file.name}: 문서 등록에 실패했습니다`);
@@ -167,7 +167,11 @@ export async function POST(request: NextRequest) {
     }
 
     log.info(
-      { userKey: currentUser.user_key, uploaded: created.length, failed: errors.length },
+      {
+        userKey: currentUser.user_key,
+        uploaded: created.length,
+        failed: errors.length,
+      },
       "업로드 완료"
     );
     return NextResponse.json(response, { status: 201 });
