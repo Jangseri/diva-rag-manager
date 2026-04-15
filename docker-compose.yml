@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     container_name: diva-rag-manager
+    user: "1007:1012"
     ports:
       - "3000:3000"
     env_file:
