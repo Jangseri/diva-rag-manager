@@ -19,8 +19,13 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
-      - rag-network
+      rag-network:
+        ipv4_address: 172.24.17.2
 
 networks:
   rag-network:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.24.17.0/24
