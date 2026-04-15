@@ -20,6 +20,8 @@ const nextConfig: NextConfig = {
       "node_modules/pino-std-serializers/**",
       "node_modules/process-warning/**",
       "node_modules/steno/**",
+      "node_modules/.prisma/client/**",
+      "node_modules/@prisma/client/**",
     ],
   },
 };
