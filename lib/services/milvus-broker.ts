@@ -14,15 +14,18 @@ export class MilvusBrokerError extends Error {
   }
 }
 
-const COLLECTION_NAME = process.env.MILVUS_COLLECTION_NAME || "llm_workcenter_v3";
+const COLLECTION_NAME =
+  process.env.MILVUS_COLLECTION_NAME || "llm_workcenter_v2_hybrid";
+
+// 스펙: HNSW + L2 + ef=100 (권장 균형값)
 const DEFAULT_INDEX_INFO = {
   index_type: "HNSW",
   metric_type: "L2",
-  params: {},
+  params: { ef: 100 },
 };
 
 interface MilvusBrokerEntity {
-  id?: string;
+  id?: string | number;
   file_name?: string;
   chunk_context?: string;
   category?: string;
@@ -30,7 +33,7 @@ interface MilvusBrokerEntity {
 }
 
 interface MilvusBrokerHit {
-  id: string;
+  id: string | number;
   distance: number;
   entity?: MilvusBrokerEntity;
 }
@@ -39,7 +42,7 @@ interface MilvusBrokerResponse {
   code: number;
   error_code?: string | null;
   error_message?: string | null;
-  body?: MilvusBrokerHit[];
+  body?: MilvusBrokerHit[] | null;
 }
 
 function getBaseUrl(): string {
@@ -61,30 +64,44 @@ function getEndpoint(method: SearchMethod): string {
   return `${base}/v2/collections/workcenter/${COLLECTION_NAME}/partitions/search`;
 }
 
-/**
- * L2 distance를 0~1 score로 정규화.
- * distance는 작을수록 유사. 1 / (1 + distance) 공식 사용.
- */
-function distanceToScore(distance: number): number {
-  if (distance < 0) return 0;
-  return Number((1 / (1 + distance)).toFixed(4));
-}
-
 function getFileFormat(fileName: string): string {
   const ext = fileName.split(".").pop()?.toLowerCase();
   return ext || "unknown";
 }
 
-function toSearchResult(hit: MilvusBrokerHit): SearchResult {
+/**
+ * RRF 점수는 "높을수록 관련도 높음". 결과 내 max 값으로 0~1 정규화.
+ * (RRF 점수는 1/(k+rank) 합이라 절대값이 작음 → UI 표시용으로 상대 스케일 사용)
+ */
+function normalizeScores(hits: MilvusBrokerHit[]): number[] {
+  if (hits.length === 0) return [];
+  const distances = hits.map((h) => (typeof h.distance === "number" ? h.distance : 0));
+  const max = Math.max(...distances);
+  if (max <= 0) return distances.map(() => 0);
+  return distances.map((d) => Number((d / max).toFixed(4)));
+}
+
+function buildSnippet(entity: MilvusBrokerEntity): string {
+  const ctx = entity.chunk_context?.trim() || "";
+  const page = entity.sub_category?.trim();
+  // 페이지 정보가 있으면 스니펫 앞에 표시
+  if (page && /^page_\d+$/i.test(page)) {
+    const pageNum = page.replace(/^page_/i, "");
+    return `[p.${pageNum}] ${ctx}`;
+  }
+  return ctx;
+}
+
+function toSearchResult(hit: MilvusBrokerHit, normalizedScore: number): SearchResult {
   const entity = hit.entity || {};
   const fileName = entity.file_name || "";
   return {
-    document_id: entity.id || hit.id,
+    document_id: String(entity.id ?? hit.id),
     file_name: fileName,
-    score: distanceToScore(hit.distance),
-    snippet: entity.chunk_context || "",
+    score: normalizedScore,
+    snippet: buildSnippet(entity),
     file_format: getFileFormat(fileName),
-    rgst_dt: new Date().toISOString(), // milvus-broker 응답에 없으므로 현재 시각으로 대체
+    rgst_dt: new Date().toISOString(),
   };
 }
 
@@ -100,11 +117,11 @@ export async function searchViaBroker(params: {
   const body = {
     dnis: user_key,
     message: query,
-    index_info: DEFAULT_INDEX_INFO,
+    indexInfo: DEFAULT_INDEX_INFO,
     limit: top_k,
   };
 
-  log.info({ method, userKey: user_key, top_k }, "milvus-broker 검색 요청");
+  log.info({ method, userKey: user_key, top_k, collection: COLLECTION_NAME }, "milvus-broker 검색 요청");
 
   let res: Response;
   try {
@@ -118,15 +135,17 @@ export async function searchViaBroker(params: {
     const err = error as Error & { cause?: { code?: string } };
     const causeCode = err.cause?.code;
 
-    // 연결 거부 / DNS / 네트워크
-    if (causeCode === "ECONNREFUSED" || causeCode === "ENOTFOUND" || causeCode === "EHOSTUNREACH") {
+    if (
+      causeCode === "ECONNREFUSED" ||
+      causeCode === "ENOTFOUND" ||
+      causeCode === "EHOSTUNREACH"
+    ) {
       log.error({ err, causeCode }, "milvus-broker 연결 실패");
       throw new MilvusBrokerError(
         "검색 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
         "UNAVAILABLE"
       );
     }
-    // 타임아웃
     if (err.name === "TimeoutError" || err.name === "AbortError") {
       log.error({ err }, "milvus-broker 타임아웃");
       throw new MilvusBrokerError(
@@ -154,6 +173,7 @@ export async function searchViaBroker(params: {
 
   const data: MilvusBrokerResponse = await res.json();
 
+  // 스펙: HTTP 200이어도 code != 2000이면 실패
   if (data.code !== 2000) {
     log.error(
       { code: data.code, errCode: data.error_code, errMsg: data.error_message },
@@ -168,5 +188,6 @@ export async function searchViaBroker(params: {
   const hits = data.body || [];
   log.info({ count: hits.length }, "milvus-broker 검색 결과");
 
-  return hits.map(toSearchResult);
+  const normalized = normalizeScores(hits);
+  return hits.map((hit, idx) => toSearchResult(hit, normalized[idx]));
 }
