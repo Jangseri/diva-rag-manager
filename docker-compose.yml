@@ -17,6 +17,11 @@ services:
     volumes:
       - /data/diva:/data/diva
       - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "7"
     restart: unless-stopped
     networks:
       rag-network:
