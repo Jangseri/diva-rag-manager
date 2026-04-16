@@ -1,14 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getDocument,
-  softDeleteDocument,
-} from "@/lib/services/document-service";
+import { getDocument } from "@/lib/services/document-service";
+import { initiateDeletion } from "@/lib/services/deletion-gate";
 import { toDocumentResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
 import { publishDocumentDeleted } from "@/lib/services/event-publisher";
+import type { DocumentRecord } from "@/types";
 
 const log = createLogger("api/documents/[id]");
 
@@ -39,26 +38,32 @@ export async function DELETE(
     const { id } = await params;
     const currentUser = getCurrentUser();
 
-    const doc = await softDeleteDocument(id, currentUser.name);
-    log.info({ file_id: id, userKey: currentUser.user_key }, "문서 소프트 삭제");
+    // 삭제 프로세스 개시 (status=DELETING, confirmation row 생성)
+    const doc = (await initiateDeletion(id, currentUser.name)) as DocumentRecord;
+    log.info({ file_id: id, userKey: currentUser.user_key }, "삭제 프로세스 개시");
 
-    // Redis Stream에 DOCUMENT_DELETED 발행
+    // DOCUMENT_DELETED 발행 → extract, milvus가 각자 처리 후 confirmation 발행
     await publishDocumentDeleted({
       file_id: id,
       user_key: currentUser.user_key,
       collection_name: doc.collection_name,
     });
 
-    return NextResponse.json({
-      success: true,
-      data: toDocumentResponse(doc),
-    });
+    // 202 Accepted: 처리 접수됨, 실제 삭제는 confirmation gate 통과 후
+    return NextResponse.json(
+      {
+        success: true,
+        data: toDocumentResponse(doc),
+        message: "삭제 요청이 접수되었습니다. 처리 완료까지 최대 5분 소요됩니다.",
+      },
+      { status: 202 }
+    );
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === "문서를 찾을 수 없습니다") {
         return errorResponse(error.message, 404);
       }
-      if (error.message === "이미 삭제된 문서입니다") {
+      if (error.message === "이미 삭제 처리 중이거나 삭제된 문서입니다") {
         return errorResponse(error.message, 409);
       }
     }

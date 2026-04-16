@@ -2,73 +2,61 @@ import { getRedisSubscriber } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
 import { createLogger } from "@/lib/logger";
 import { STREAMS, publishDocumentUploaded } from "./event-publisher";
+import {
+  markExtractConfirmed,
+  markExtractFailure,
+  markIndexConfirmed,
+  markIndexFailure,
+} from "./deletion-gate";
 import os from "os";
 
 const log = createLogger("event-consumer");
 
 const CONSUMER_GROUP = "cg:rag-manager";
 const CONSUMER_NAME = `rag-manager-${os.hostname()}-${process.pid}`;
-const DLQ_STREAM = `${STREAMS.EXTRACT}:dlq`;
 
 const IDLE_MS = 60_000;
 const CLAIM_INTERVAL_MS = 30_000;
 const MAX_DELIVERY_COUNT = 5;
 const MAX_RETRY = 3;
 
-interface ExtractStartedEvent {
+type KnownEventType =
+  | "EXTRACT_STARTED"
+  | "EXTRACT_COMPLETED"
+  | "EXTRACT_FAILED"
+  | "EXTRACT_DELETED"
+  | "EXTRACT_DELETE_FAILED"
+  | "INDEX_COMPLETED"
+  | "INDEX_FAILED"
+  | "INDEX_DELETED"
+  | "INDEX_DELETE_FAILED";
+
+interface BaseEvent {
   event_id: string;
-  event_type: "EXTRACT_STARTED";
+  event_type: KnownEventType | string;
   schema_version: string;
   timestamp: string;
   file_id: string;
-  user_key: string;
+  user_key?: string;
+  error_code?: string;
+  error_message?: string;
+  retryable?: boolean;
 }
-
-interface ExtractCompletedEvent {
-  event_id: string;
-  event_type: "EXTRACT_COMPLETED";
-  schema_version: string;
-  timestamp: string;
-  file_id: string;
-  user_key: string;
-  collection_name?: string | null;
-  file_name?: string;
-  file_type?: string;
-  output_path?: string;
-  redis_key?: string;
-}
-
-interface ExtractFailedEvent {
-  event_id: string;
-  event_type: "EXTRACT_FAILED";
-  schema_version: string;
-  timestamp: string;
-  file_id: string;
-  user_key: string;
-  error_code: string;
-  error_message: string;
-  retryable: boolean;
-}
-
-type ExtractEvent =
-  | ExtractStartedEvent
-  | ExtractCompletedEvent
-  | ExtractFailedEvent;
 
 let running = false;
-let claimTimer: NodeJS.Timeout | null = null;
+const claimTimers: NodeJS.Timeout[] = [];
 
-// -------------------- 내부 유틸 --------------------
+// -------------------- 공통 유틸 --------------------
 
-async function ensureConsumerGroup() {
+async function ensureConsumerGroup(stream: string) {
   const client = getRedisSubscriber();
   try {
-    await client.xgroup("CREATE", STREAMS.EXTRACT, CONSUMER_GROUP, "$", "MKSTREAM");
-    log.info({ stream: STREAMS.EXTRACT, group: CONSUMER_GROUP }, "Consumer Group 생성");
+    await client.xgroup("CREATE", stream, CONSUMER_GROUP, "$", "MKSTREAM");
+    log.info({ stream, group: CONSUMER_GROUP }, "Consumer Group 생성");
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("BUSYGROUP")) {
-      log.debug({ group: CONSUMER_GROUP }, "Consumer Group 이미 존재");
+      log.debug({ stream, group: CONSUMER_GROUP }, "Consumer Group 이미 존재");
     } else {
       throw err;
     }
@@ -89,11 +77,8 @@ async function markProcessed(
   file_id: string | null
 ): Promise<void> {
   await prisma.processedEvent
-    .create({
-      data: { event_id, event_type, file_id },
-    })
+    .create({ data: { event_id, event_type, file_id } })
     .catch((e) => {
-      // 유니크 제약 충돌은 이미 처리됐다는 의미
       if (!String(e).includes("Unique constraint")) throw e;
     });
 }
@@ -101,22 +86,27 @@ async function markProcessed(
 async function updateFileStatus(
   file_id: string,
   file_status: string,
-  extra?: { last_error_code?: string | null; retry_count?: number }
+  extra?: {
+    last_error_code?: string | null;
+    retry_count?: number;
+    updt_nm?: string;
+  }
 ): Promise<boolean> {
   try {
+    const { updt_nm, ...rest } = extra || {};
     const result = await prisma.document.updateMany({
       where: { file_id },
       data: {
         file_status,
-        updt_nm: "docs-extract-system",
-        ...extra,
+        updt_nm: updt_nm || "docs-extract-system",
+        ...rest,
       },
     });
     if (result.count === 0) {
       log.warn({ file_id, file_status }, "DB에 없는 문서 (이벤트 무시)");
       return true;
     }
-    log.info({ file_id, file_status, ...extra }, "file_status 업데이트");
+    log.info({ file_id, file_status, ...rest }, "file_status 업데이트");
     return true;
   } catch (err) {
     log.error({ err, file_id, file_status }, "file_status 업데이트 실패");
@@ -126,40 +116,37 @@ async function updateFileStatus(
 
 // -------------------- 이벤트 타입별 처리 --------------------
 
-async function handleExtractStarted(event: ExtractStartedEvent): Promise<boolean> {
+async function handleExtractStarted(event: BaseEvent) {
   return updateFileStatus(event.file_id, "PROCESSING");
 }
 
-async function handleExtractCompleted(event: ExtractCompletedEvent): Promise<boolean> {
+async function handleExtractCompleted(event: BaseEvent) {
   return updateFileStatus(event.file_id, "EXTRACTED", { last_error_code: null });
 }
 
-async function handleExtractFailed(event: ExtractFailedEvent): Promise<boolean> {
-  const { file_id, retryable, error_code, error_message } = event;
+async function handleExtractFailed(event: BaseEvent) {
+  const { file_id, retryable, error_code } = event;
 
   const doc = await prisma.document.findUnique({ where: { file_id } });
   if (!doc) {
-    log.warn({ file_id }, "DB에 없는 문서 (FAILED 이벤트 무시)");
+    log.warn({ file_id }, "DB에 없는 문서 (EXTRACT_FAILED 무시)");
     return true;
   }
 
-  log.warn({ file_id, error_code, error_message, retryable }, "추출 실패 수신");
+  log.warn(
+    { file_id, error_code, retryable, retry_count: doc.retry_count },
+    "추출 실패 수신"
+  );
 
-  // retryable + 재시도 여력 있음 → 재발행
   if (retryable && doc.retry_count < MAX_RETRY) {
     const newRetryCount = doc.retry_count + 1;
-    log.info(
-      { file_id, retry_count: newRetryCount, max: MAX_RETRY },
-      "재시도 이벤트 재발행"
-    );
+    log.info({ file_id, retry_count: newRetryCount }, "추출 재시도 재발행");
 
-    // DB 상태: 재시도 중임을 기록 (PROCESSING 복귀 + retry_count 증가)
     await updateFileStatus(file_id, "PROCESSING", {
-      last_error_code: error_code,
+      last_error_code: error_code || null,
       retry_count: newRetryCount,
     });
 
-    // DOCUMENT_UPLOADED 재발행
     if (doc.origin_path) {
       await publishDocumentUploaded({
         file_id: doc.file_id,
@@ -173,20 +160,96 @@ async function handleExtractFailed(event: ExtractFailedEvent): Promise<boolean> 
     } else {
       log.error({ file_id }, "origin_path 없어 재발행 불가 → FAILED 고정");
       await updateFileStatus(file_id, "FAILED", {
-        last_error_code: error_code,
+        last_error_code: error_code || "NO_ORIGIN_PATH",
       });
     }
     return true;
   }
 
-  // retryable=false 또는 재시도 한도 초과 → 영구 FAILED
-  await updateFileStatus(file_id, "FAILED", {
-    last_error_code: error_code,
+  return updateFileStatus(file_id, "FAILED", {
+    last_error_code: error_code || null,
   });
+}
+
+async function handleExtractDeleted(event: BaseEvent) {
+  await markExtractConfirmed(event.file_id);
   return true;
 }
 
-async function processEvent(event: ExtractEvent): Promise<boolean> {
+async function handleExtractDeleteFailed(event: BaseEvent) {
+  await markExtractFailure(event.file_id, event.error_code);
+  return true;
+}
+
+async function handleIndexCompleted(event: BaseEvent) {
+  return updateFileStatus(event.file_id, "INDEXED", {
+    last_error_code: null,
+    updt_nm: "milvus-indexer",
+  });
+}
+
+async function handleIndexFailed(event: BaseEvent) {
+  const { file_id, retryable, error_code } = event;
+
+  const doc = await prisma.document.findUnique({ where: { file_id } });
+  if (!doc) {
+    log.warn({ file_id }, "DB에 없는 문서 (INDEX_FAILED 무시)");
+    return true;
+  }
+
+  log.warn(
+    { file_id, error_code, retryable, retry_count: doc.retry_count },
+    "인덱싱 실패 수신"
+  );
+
+  if (retryable && doc.retry_count < MAX_RETRY) {
+    const newRetryCount = doc.retry_count + 1;
+    log.info({ file_id, retry_count: newRetryCount }, "인덱싱 재시도 재발행");
+
+    // 인덱싱 재시도는 추출부터 재출발 (DOCUMENT_UPLOADED 재발행)
+    await updateFileStatus(file_id, "PROCESSING", {
+      last_error_code: error_code || null,
+      retry_count: newRetryCount,
+      updt_nm: "milvus-indexer",
+    });
+
+    if (doc.origin_path) {
+      await publishDocumentUploaded({
+        file_id: doc.file_id,
+        user_key: doc.user_key,
+        collection_name: doc.collection_name,
+        file_name: doc.file_name,
+        file_type: doc.file_format,
+        file_size: Number(doc.file_size),
+        origin_path: doc.origin_path,
+      });
+    } else {
+      log.error({ file_id }, "origin_path 없어 재발행 불가 → INDEX_FAILED 고정");
+      await updateFileStatus(file_id, "INDEX_FAILED", {
+        last_error_code: error_code || "NO_ORIGIN_PATH",
+        updt_nm: "milvus-indexer",
+      });
+    }
+    return true;
+  }
+
+  return updateFileStatus(file_id, "INDEX_FAILED", {
+    last_error_code: error_code || null,
+    updt_nm: "milvus-indexer",
+  });
+}
+
+async function handleIndexDeleted(event: BaseEvent) {
+  await markIndexConfirmed(event.file_id);
+  return true;
+}
+
+async function handleIndexDeleteFailed(event: BaseEvent) {
+  await markIndexFailure(event.file_id, event.error_code);
+  return true;
+}
+
+async function processEvent(event: BaseEvent): Promise<boolean> {
   switch (event.event_type) {
     case "EXTRACT_STARTED":
       return handleExtractStarted(event);
@@ -194,8 +257,20 @@ async function processEvent(event: ExtractEvent): Promise<boolean> {
       return handleExtractCompleted(event);
     case "EXTRACT_FAILED":
       return handleExtractFailed(event);
+    case "EXTRACT_DELETED":
+      return handleExtractDeleted(event);
+    case "EXTRACT_DELETE_FAILED":
+      return handleExtractDeleteFailed(event);
+    case "INDEX_COMPLETED":
+      return handleIndexCompleted(event);
+    case "INDEX_FAILED":
+      return handleIndexFailed(event);
+    case "INDEX_DELETED":
+      return handleIndexDeleted(event);
+    case "INDEX_DELETE_FAILED":
+      return handleIndexDeleteFailed(event);
     default:
-      log.warn({ event }, "알 수 없는 event_type (ACK 후 무시)");
+      log.warn({ event_type: event.event_type }, "알 수 없는 event_type (ACK)");
       return true;
   }
 }
@@ -207,16 +282,18 @@ async function handleMessage(msgId: string, fields: string[]): Promise<boolean> 
       log.warn({ msgId, fields }, "data 필드 없음");
       return true;
     }
-    const event: ExtractEvent = JSON.parse(fields[dataIdx + 1]);
+    const event: BaseEvent = JSON.parse(fields[dataIdx + 1]);
 
     if (!event.event_id || !event.event_type || !event.file_id) {
       log.warn({ msgId, event }, "필수 필드 누락 (ACK 후 스킵)");
       return true;
     }
 
-    // 멱등성 체크
     if (await isAlreadyProcessed(event.event_id)) {
-      log.debug({ event_id: event.event_id, event_type: event.event_type }, "중복 이벤트 스킵");
+      log.debug(
+        { event_id: event.event_id, event_type: event.event_type },
+        "중복 이벤트 스킵"
+      );
       return true;
     }
 
@@ -231,29 +308,30 @@ async function handleMessage(msgId: string, fields: string[]): Promise<boolean> 
   }
 }
 
-async function ackMessage(msgId: string): Promise<void> {
+async function ackMessage(stream: string, msgId: string): Promise<void> {
   const client = getRedisSubscriber();
-  await client.xack(STREAMS.EXTRACT, CONSUMER_GROUP, msgId);
+  await client.xack(stream, CONSUMER_GROUP, msgId);
 }
 
-async function moveToDlq(msgId: string, fields: string[]): Promise<void> {
+async function moveToDlq(stream: string, msgId: string, fields: string[]) {
   const client = getRedisSubscriber();
+  const dlqStream = `${stream}:dlq`;
   const args: string[] = [];
   for (let i = 0; i < fields.length; i += 2) {
     args.push(fields[i], fields[i + 1]);
   }
-  args.push("original_stream", STREAMS.EXTRACT);
+  args.push("original_stream", stream);
   args.push("original_id", msgId);
   args.push("dead_at", new Date().toISOString());
 
-  await client.xadd(DLQ_STREAM, "*", ...args);
-  await ackMessage(msgId);
-  log.error({ msgId, stream: DLQ_STREAM }, "DLQ로 이동");
+  await client.xadd(dlqStream, "*", ...args);
+  await ackMessage(stream, msgId);
+  log.error({ msgId, stream: dlqStream }, "DLQ로 이동");
 }
 
-// -------------------- 메인 루프 --------------------
+// -------------------- 스트림별 루프 --------------------
 
-async function consumeLoop() {
+async function consumeLoop(stream: string) {
   const client = getRedisSubscriber();
 
   while (running) {
@@ -267,7 +345,7 @@ async function consumeLoop() {
         "BLOCK",
         5000,
         "STREAMS",
-        STREAMS.EXTRACT,
+        stream,
         ">"
       )) as [string, [string, string[]][]][] | null;
 
@@ -277,23 +355,23 @@ async function consumeLoop() {
         for (const [msgId, fields] of messages) {
           const success = await handleMessage(msgId, fields);
           if (success) {
-            await ackMessage(msgId);
+            await ackMessage(stream, msgId);
           }
         }
       }
     } catch (err) {
-      log.error({ err }, "consume 루프 에러 (5초 후 재시도)");
+      log.error({ err, stream }, "consume 루프 에러 (5초 후 재시도)");
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
-  log.info("Consumer 루프 종료");
+  log.info({ stream }, "Consumer 루프 종료");
 }
 
-async function claimPending() {
+async function claimPending(stream: string) {
   const client = getRedisSubscriber();
   try {
     const result = (await client.xautoclaim(
-      STREAMS.EXTRACT,
+      stream,
       CONSUMER_GROUP,
       CONSUMER_NAME,
       IDLE_MS,
@@ -308,7 +386,7 @@ async function claimPending() {
 
     for (const [msgId, fields] of claimed) {
       const pending = (await client.xpending(
-        STREAMS.EXTRACT,
+        stream,
         CONSUMER_GROUP,
         "IDLE",
         0,
@@ -320,19 +398,23 @@ async function claimPending() {
       const deliveryCount = pending?.[0]?.[3] ?? 1;
 
       if (deliveryCount >= MAX_DELIVERY_COUNT) {
-        await moveToDlq(msgId, fields);
+        await moveToDlq(stream, msgId, fields);
         continue;
       }
 
       const success = await handleMessage(msgId, fields);
       if (success) {
-        await ackMessage(msgId);
+        await ackMessage(stream, msgId);
       }
     }
   } catch (err) {
-    log.error({ err }, "XAUTOCLAIM 실패");
+    log.error({ err, stream }, "XAUTOCLAIM 실패");
   }
 }
+
+// -------------------- 공개 API --------------------
+
+const SUBSCRIBED_STREAMS = [STREAMS.EXTRACT, STREAMS.INDEX];
 
 export async function startConsumer() {
   if (running) {
@@ -340,19 +422,31 @@ export async function startConsumer() {
     return;
   }
 
-  log.info({ consumer: CONSUMER_NAME }, "Redis Consumer 시작");
+  log.info(
+    { consumer: CONSUMER_NAME, streams: SUBSCRIBED_STREAMS },
+    "Redis Consumer 시작"
+  );
 
   try {
-    await ensureConsumerGroup();
+    for (const stream of SUBSCRIBED_STREAMS) {
+      await ensureConsumerGroup(stream);
+    }
     running = true;
 
-    consumeLoop().catch((err) =>
-      log.error({ err }, "Consumer 루프 비정상 종료")
-    );
+    for (const stream of SUBSCRIBED_STREAMS) {
+      consumeLoop(stream).catch((err) =>
+        log.error({ err, stream }, "Consumer 루프 비정상 종료")
+      );
+    }
 
-    claimTimer = setInterval(() => {
-      claimPending().catch((err) => log.error({ err }, "주기 재클레임 실패"));
-    }, CLAIM_INTERVAL_MS);
+    for (const stream of SUBSCRIBED_STREAMS) {
+      const timer = setInterval(() => {
+        claimPending(stream).catch((err) =>
+          log.error({ err, stream }, "주기 재클레임 실패")
+        );
+      }, CLAIM_INTERVAL_MS);
+      claimTimers.push(timer);
+    }
 
     log.info(
       {
@@ -371,9 +465,9 @@ export async function startConsumer() {
 
 export function stopConsumer() {
   running = false;
-  if (claimTimer) {
-    clearInterval(claimTimer);
-    claimTimer = null;
+  while (claimTimers.length > 0) {
+    const t = claimTimers.pop();
+    if (t) clearInterval(t);
   }
   log.info("Consumer 중지");
 }

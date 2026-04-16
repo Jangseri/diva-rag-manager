@@ -82,18 +82,22 @@ export function DocumentToolbar({
             <SelectItem value="UPLOADED">UPLOADED</SelectItem>
             <SelectItem value="PROCESSING">PROCESSING</SelectItem>
             <SelectItem value="EXTRACTED">EXTRACTED</SelectItem>
+            <SelectItem value="INDEXED">INDEXED</SelectItem>
             <SelectItem value="FAILED">FAILED</SelectItem>
+            <SelectItem value="INDEX_FAILED">INDEX_FAILED</SelectItem>
           </SelectContent>
         </Select>
 
         {/* Doc Status Filter (문서 관리 상태) */}
         <Select value={docStatus} onValueChange={(v) => onDocStatusChange(v ?? "ACTIVE")}>
-          <SelectTrigger className="h-9 w-[130px]">
+          <SelectTrigger className="h-9 w-[180px]">
             <SelectValue placeholder="문서 상태" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ACTIVE">ACTIVE</SelectItem>
+            <SelectItem value="DELETING">DELETING</SelectItem>
             <SelectItem value="DELETED">DELETED</SelectItem>
+            <SelectItem value="DELETE_PARTIAL_FAILURE">DELETE_PARTIAL_FAILURE</SelectItem>
           </SelectContent>
         </Select>
       </div>

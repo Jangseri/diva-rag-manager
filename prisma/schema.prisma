@@ -38,3 +38,21 @@ model ProcessedEvent {
   @@index([file_id])
   @@map("processed_events")
 }
+
+/// 분산 삭제 confirmation 추적 (EXTRACT_DELETED + INDEX_DELETED 대기)
+model DeletionConfirmation {
+  file_id              String    @id @db.VarChar(26)
+  extract_confirmed    Boolean   @default(false)
+  extract_error_code   String?   @db.VarChar(50)
+  extract_confirmed_at DateTime? @db.DateTime(0)
+  index_confirmed      Boolean   @default(false)
+  index_error_code     String?   @db.VarChar(50)
+  index_confirmed_at   DateTime? @db.DateTime(0)
+  deletion_due_at      DateTime  @db.DateTime(0)
+  finalized_at         DateTime? @db.DateTime(0)
+  created_at           DateTime  @default(now()) @db.DateTime(0)
+  updated_at           DateTime  @updatedAt @db.DateTime(0)
+
+  @@index([finalized_at, deletion_due_at])
+  @@map("deletion_confirmations")
+}

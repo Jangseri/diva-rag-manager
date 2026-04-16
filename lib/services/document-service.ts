@@ -104,8 +104,12 @@ export async function softDeleteDocument(
   if (!existing) {
     throw new Error("문서를 찾을 수 없습니다");
   }
-  if (existing.status === "DELETED") {
-    throw new Error("이미 삭제된 문서입니다");
+  if (
+    existing.status === "DELETED" ||
+    existing.status === "DELETING" ||
+    existing.status === "DELETE_PARTIAL_FAILURE"
+  ) {
+    throw new Error("이미 삭제 처리 중이거나 삭제된 문서입니다");
   }
 
   const doc = await prisma.document.update({

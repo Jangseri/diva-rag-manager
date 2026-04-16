@@ -192,7 +192,7 @@ export default function DocumentDetailPage({
       </Card>
 
       {/* Preview */}
-      {document.status === "ACTIVE" && (
+      {document.status !== "DELETED" && document.status !== "DELETING" && (
         <PreviewCard preview={preview} loading={previewLoading} />
       )}
 
@@ -215,12 +215,39 @@ function PreviewCard({
   preview: PreviewResponse | null;
   loading: boolean;
 }) {
+  const [tab, setTab] = useState<"original" | "extracted">("original");
+  const section = preview ? preview[tab] : null;
+
   return (
     <Card>
       <div className="flex items-center gap-2 border-b border-border px-6 py-3">
         <Eye className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">미리보기</h2>
-        {preview?.truncated && (
+
+        <div className="ml-4 flex gap-1">
+          <button
+            onClick={() => setTab("original")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              tab === "original"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            원본
+          </button>
+          <button
+            onClick={() => setTab("extracted")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              tab === "extracted"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            추출 텍스트
+          </button>
+        </div>
+
+        {section?.truncated && (
           <span className="ml-auto text-xs text-muted-foreground">
             일부만 표시 (500KB 한도)
           </span>
@@ -234,16 +261,16 @@ function PreviewCard({
             <Skeleton className="h-4 w-5/6" />
             <Skeleton className="h-4 w-4/5" />
           </div>
-        ) : !preview?.previewable ? (
+        ) : !section?.previewable ? (
           <div className="flex items-start gap-2 rounded-md bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <span>
-              {preview?.reason || "미리보기를 사용할 수 없습니다"}
+              {section?.reason || "미리보기를 사용할 수 없습니다"}
             </span>
           </div>
         ) : (
           <pre className="max-h-96 overflow-auto rounded-md bg-muted/40 p-4 text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground font-mono">
-            {preview.content}
+            {section.content}
           </pre>
         )}
       </CardContent>

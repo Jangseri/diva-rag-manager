@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { softDeleteDocument } from "@/lib/services/document-service";
+import { initiateDeletion } from "@/lib/services/deletion-gate";
 import { errorResponse, validationErrorResponse } from "@/lib/api-response";
 import { getCurrentUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
       try {
-        const doc = await softDeleteDocument(id, currentUser.name);
+        const doc = await initiateDeletion(id, currentUser.name);
         success.push(id);
 
         await publishDocumentDeleted({
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         failed.push({
           file_id: id,
-          error: error instanceof Error ? error.message : "삭제 실패",
+          error: error instanceof Error ? error.message : "삭제 개시 실패",
         });
       }
     }
@@ -53,9 +53,11 @@ export async function POST(request: NextRequest) {
         success: success.length,
         failed: failed.length,
       },
-      "일괄 삭제 완료"
+      "일괄 삭제 개시"
     );
-    return NextResponse.json({ success, failed });
+
+    // 202 Accepted: confirmation gate 통과 후 실제 삭제
+    return NextResponse.json({ success, failed }, { status: 202 });
   } catch (error) {
     log.error({ err: error }, "일괄 삭제 실패");
     return errorResponse("서버 오류가 발생했습니다", 500);

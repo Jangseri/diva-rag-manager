@@ -7,10 +7,16 @@ export const FILE_STATUSES = [
   "EXTRACTED",
   "INDEXED",
   "FAILED",
+  "INDEX_FAILED",
 ] as const;
 export type FileStatus = (typeof FILE_STATUSES)[number];
 
-export const DOCUMENT_STATUSES = ["ACTIVE", "DELETED"] as const;
+export const DOCUMENT_STATUSES = [
+  "ACTIVE",
+  "DELETING",
+  "DELETED",
+  "DELETE_PARTIAL_FAILURE",
+] as const;
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 
 export const SEARCH_METHODS = ["bm25", "vector", "hybrid"] as const;

@@ -20,8 +20,17 @@ export const DocumentListQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).default("desc"),
   search: z.string().optional(),
   format: z.enum(ALLOWED_FILE_FORMATS).optional(),
-  status: z.enum(["ACTIVE", "DELETED"]).optional(),
-  file_status: z.enum(["UPLOADED", "PROCESSING", "EXTRACTED", "FAILED"]).optional(),
+  status: z.enum(["ACTIVE", "DELETING", "DELETED", "DELETE_PARTIAL_FAILURE"]).optional(),
+  file_status: z
+    .enum([
+      "UPLOADED",
+      "PROCESSING",
+      "EXTRACTED",
+      "INDEXED",
+      "FAILED",
+      "INDEX_FAILED",
+    ])
+    .optional(),
 });
 
 export type DocumentListQuery = z.infer<typeof DocumentListQuerySchema>;

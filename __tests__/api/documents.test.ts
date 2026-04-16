@@ -241,7 +241,16 @@ describe("softDeleteDocument", () => {
     prismaMock.document.findUnique.mockResolvedValue(record);
 
     await expect(softDeleteDocument("01DEL", "관리자")).rejects.toThrow(
-      "이미 삭제된 문서입니다"
+      "이미 삭제 처리 중이거나 삭제된 문서입니다"
+    );
+  });
+
+  it("should throw error if document is DELETING", async () => {
+    const record = createDocumentRecord({ file_id: "01DEL", status: "DELETING" });
+    prismaMock.document.findUnique.mockResolvedValue(record);
+
+    await expect(softDeleteDocument("01DEL", "관리자")).rejects.toThrow(
+      "이미 삭제 처리 중이거나 삭제된 문서입니다"
     );
   });
 });

@@ -16,9 +16,20 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     label: "EXTRACTED",
     className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800",
   },
+  INDEXED: {
+    label: "INDEXED",
+    className:
+      "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950 dark:text-violet-300 dark:border-violet-800",
+  },
   FAILED: {
     label: "FAILED",
-    className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
+    className:
+      "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
+  },
+  INDEX_FAILED: {
+    label: "INDEX_FAILED",
+    className:
+      "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
   },
 };
 

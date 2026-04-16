@@ -8,5 +8,8 @@ export async function register() {
   }
 
   const { startConsumer } = await import("./lib/services/event-consumer");
+  const { startTimeoutJob } = await import("./lib/services/timeout-job");
+
   await startConsumer();
+  startTimeoutJob();
 }

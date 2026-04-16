@@ -15,7 +15,7 @@ export class MilvusBrokerError extends Error {
 }
 
 const COLLECTION_NAME =
-  process.env.MILVUS_COLLECTION_NAME || "llm_workcenter_v2_hybrid";
+  process.env.MILVUS_COLLECTION_NAME || "customized_setup_hybrid";
 
 // 스펙: HNSW + L2 + ef=100 (권장 균형값)
 const DEFAULT_INDEX_INFO = {

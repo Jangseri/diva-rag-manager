@@ -106,12 +106,17 @@ export function getDownloadUrl(id: string): string {
   return `/api/documents/${id}/download`;
 }
 
-export interface PreviewResponse {
+export interface PreviewSection {
   previewable: boolean;
   content?: string;
   truncated?: boolean;
-  size?: number;
   reason?: string;
+}
+
+export interface PreviewResponse {
+  original: PreviewSection;
+  extracted: PreviewSection;
+  size: number;
 }
 
 export async function fetchPreview(id: string): Promise<PreviewResponse> {

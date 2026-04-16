@@ -7,6 +7,7 @@ const log = createLogger("event-publisher");
 export const STREAMS = {
   DOCUMENTS: "rag:documents",
   EXTRACT: "rag:extract",
+  INDEX: "rag:index",
 } as const;
 
 const SCHEMA_VERSION = "1";
