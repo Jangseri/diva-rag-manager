@@ -144,13 +144,13 @@ export function DocumentUploadDialog({
               파일을 드래그하거나 클릭하여 선택
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              PDF, DOCX, TXT, HWP, XLSX, PPTX
+              PDF, DOCX, PPTX, XLSX, HWP, TXT, JPG, PNG
             </p>
             <input
               ref={inputRef}
               type="file"
               multiple
-              accept=".pdf,.docx,.txt,.hwp,.xlsx,.pptx"
+              accept=".pdf,.docx,.pptx,.xlsx,.hwp,.txt,.jpg,.jpeg,.png"
               className="hidden"
               onChange={(e) => {
                 if (e.target.files) validateAndAddFiles(e.target.files);

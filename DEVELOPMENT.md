@@ -117,7 +117,7 @@ diva-rag-manager/
 | uuid | VARCHAR(30) PK | TSID 기반 고유 식별자 |
 | file_name | VARCHAR(500) | 원본 파일명 |
 | user_key | VARCHAR(100) | 업로드 사용자 식별 키 |
-| file_format | VARCHAR(20) | 파일 확장자 (pdf, docx, txt, hwp, xlsx, pptx) |
+| file_format | VARCHAR(20) | 파일 확장자 (pdf, docx, pptx, xlsx, hwp, txt, jpg, jpeg, png) |
 | file_status | VARCHAR(20) | 파일 처리 상태 (UPLOADED/PROCESSING/EXTRACTED/FAILED) |
 | file_size | BIGINT | 파일 크기 (bytes) |
 | rgst_dt | DATETIME | 등록일시 |

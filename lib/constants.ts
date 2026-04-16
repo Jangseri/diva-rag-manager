@@ -1,12 +1,25 @@
-export const ALLOWED_FILE_FORMATS = ["pdf", "docx", "txt", "hwp", "xlsx", "pptx"] as const;
+export const ALLOWED_FILE_FORMATS = [
+  "pdf",
+  "docx",
+  "pptx",
+  "xlsx",
+  "hwp",
+  "txt",
+  "jpg",
+  "jpeg",
+  "png",
+] as const;
 
 export const ALLOWED_MIME_TYPES: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  txt: "text/plain",
-  hwp: "application/x-hwp",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  hwp: "application/x-hwp",
+  txt: "text/plain",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
 };
 
 export const MAX_FILE_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || "100", 10);

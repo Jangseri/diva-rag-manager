@@ -189,17 +189,20 @@ describe("validateFileFormat", () => {
   it("should accept allowed formats", () => {
     expect(validateFileFormat("document.pdf")).toBe(true);
     expect(validateFileFormat("report.docx")).toBe(true);
-    expect(validateFileFormat("readme.txt")).toBe(true);
-    expect(validateFileFormat("한글문서.hwp")).toBe(true);
-    expect(validateFileFormat("data.xlsx")).toBe(true);
     expect(validateFileFormat("slide.pptx")).toBe(true);
+    expect(validateFileFormat("data.xlsx")).toBe(true);
+    expect(validateFileFormat("한글문서.hwp")).toBe(true);
+    expect(validateFileFormat("readme.txt")).toBe(true);
+    expect(validateFileFormat("photo.jpg")).toBe(true);
+    expect(validateFileFormat("photo.jpeg")).toBe(true);
+    expect(validateFileFormat("image.png")).toBe(true);
   });
 
   it("should reject disallowed formats", () => {
     expect(validateFileFormat("malware.exe")).toBe(false);
     expect(validateFileFormat("script.js")).toBe(false);
     expect(validateFileFormat("archive.zip")).toBe(false);
-    expect(validateFileFormat("image.png")).toBe(false);
+    expect(validateFileFormat("animation.gif")).toBe(false);
   });
 
   it("should be case-insensitive", () => {
