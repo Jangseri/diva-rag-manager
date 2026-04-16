@@ -210,7 +210,6 @@ const colorMap = {
   emerald: {
     badge: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300",
     header: "border-emerald-200 dark:border-emerald-800",
-    bar: "bg-emerald-500",
   },
 };
 
@@ -266,7 +265,6 @@ function ResultColumn({
                 key={index}
                 result={result}
                 rank={index + 1}
-                barColor={colors.bar}
                 compact={!isFinal}
                 query={query}
               />
@@ -281,18 +279,14 @@ function ResultColumn({
 function ResultItem({
   result,
   rank,
-  barColor,
   compact,
   query,
 }: {
   result: SearchResult;
   rank: number;
-  barColor: string;
   compact: boolean;
   query: string;
 }) {
-  const scorePercent = Math.round(result.score * 100);
-
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50">
       {/* Rank */}
@@ -301,29 +295,15 @@ function ResultItem({
       </div>
 
       <div className="min-w-0 flex-1 space-y-1">
-        {/* Title + Score */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <FileFormatIcon format={result.file_format} size="sm" />
-            <Link
-              href={`/documents/${result.document_id}`}
-              className="truncate text-sm font-medium hover:text-primary hover:underline"
-            >
-              {highlightText(result.file_name, query)}
-            </Link>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1.5">
-            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-              <div
-                className={"h-full rounded-full transition-all " + barColor}
-                style={{ width: `${scorePercent}%` }}
-              />
-            </div>
-            <span className="text-xs font-medium text-muted-foreground w-8 text-right">
-              {scorePercent}%
-            </span>
-          </div>
+        {/* Title */}
+        <div className="flex items-center gap-2 min-w-0">
+          <FileFormatIcon format={result.file_format} size="sm" />
+          <Link
+            href={`/documents/${result.document_id}`}
+            className="truncate text-sm font-medium hover:text-primary hover:underline"
+          >
+            {highlightText(result.file_name, query)}
+          </Link>
         </div>
 
         {/* Snippet (최종 결과에서만 표시) */}
