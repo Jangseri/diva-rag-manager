@@ -4,8 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { getDocument } from "@/lib/services/document-service";
-import { readFile, fileExists } from "@/lib/file-storage";
-import { ORIGIN_PATH, EXTRACT_PATH } from "@/lib/constants";
+import { EXTRACT_PATH } from "@/lib/constants";
 import { errorResponse } from "@/lib/api-response";
 import { createLogger } from "@/lib/logger";
 
@@ -20,53 +19,70 @@ interface PreviewSection {
   reason?: string;
 }
 
-async function getOriginalContent(
-  user_key: string,
-  file_id: string,
-  format: string
-): Promise<PreviewSection> {
-  if (format !== "txt") {
-    return { previewable: false, reason: "원본 미리보기는 TXT 파일만 지원합니다" };
+function statusGuard(file_status: string): PreviewSection | null {
+  if (file_status === "EXTRACTED" || file_status === "INDEXED") return null;
+  if (file_status === "FAILED" || file_status === "INDEX_FAILED") {
+    return { previewable: false, reason: "추출에 실패한 문서입니다" };
   }
-  const exists = await fileExists(ORIGIN_PATH, user_key, file_id, format);
-  if (!exists) {
-    return { previewable: false, reason: "원본 파일을 찾을 수 없습니다" };
-  }
-  const buffer = await readFile(ORIGIN_PATH, user_key, file_id, format);
-  const truncated = buffer.length > MAX_PREVIEW_BYTES;
-  const content = buffer.subarray(0, MAX_PREVIEW_BYTES).toString("utf-8");
-  return { previewable: true, content, truncated };
+  return { previewable: false, reason: "추출이 완료된 후 확인할 수 있습니다" };
 }
 
-async function getExtractedContent(
+function getExtractPath(user_key: string, file_name: string): string {
+  return path.resolve(EXTRACT_PATH, user_key, `${file_name}.json`);
+}
+
+/**
+ * 추출 텍스트 탭: extracted_text 필드만 표시
+ */
+async function getExtractedText(
   user_key: string,
   file_name: string,
   file_status: string
 ): Promise<PreviewSection> {
-  if (file_status !== "EXTRACTED" && file_status !== "INDEXED") {
-    if (file_status === "FAILED" || file_status === "INDEX_FAILED") {
-      return { previewable: false, reason: "추출에 실패한 문서입니다" };
-    }
-    return { previewable: false, reason: "추출이 완료된 후 확인할 수 있습니다" };
-  }
+  const guard = statusGuard(file_status);
+  if (guard) return guard;
 
-  const extractPath = path.resolve(EXTRACT_PATH, user_key, `${file_name}.json`);
   try {
-    const stat = await fs.stat(extractPath);
-    const fd = await fs.open(extractPath, "r");
-    const bufSize = Math.min(stat.size, MAX_PREVIEW_BYTES);
-    const buf = Buffer.alloc(bufSize);
-    await fd.read(buf, 0, bufSize, 0);
-    await fd.close();
-    const truncated = stat.size > MAX_PREVIEW_BYTES;
-    let content = buf.toString("utf-8");
+    const raw = await fs.readFile(getExtractPath(user_key, file_name), "utf-8");
+    const json = JSON.parse(raw);
+    const text = json.extracted_text;
 
-    try {
-      content = JSON.stringify(JSON.parse(content), null, 2);
-    } catch {
-      // JSON 아니면 원문 유지
+    if (!text || typeof text !== "string") {
+      return { previewable: false, reason: "추출된 텍스트가 없습니다" };
     }
-    return { previewable: true, content, truncated };
+
+    const truncated = text.length > MAX_PREVIEW_BYTES;
+    return {
+      previewable: true,
+      content: truncated ? text.substring(0, MAX_PREVIEW_BYTES) : text,
+      truncated,
+    };
+  } catch {
+    return { previewable: false, reason: "추출 결과 파일을 찾을 수 없습니다" };
+  }
+}
+
+/**
+ * 원본 탭: 전체 JSON 표시
+ */
+async function getOriginalJson(
+  user_key: string,
+  file_name: string,
+  file_status: string
+): Promise<PreviewSection> {
+  const guard = statusGuard(file_status);
+  if (guard) return guard;
+
+  try {
+    const raw = await fs.readFile(getExtractPath(user_key, file_name), "utf-8");
+    const formatted = JSON.stringify(JSON.parse(raw), null, 2);
+    const truncated = formatted.length > MAX_PREVIEW_BYTES;
+
+    return {
+      previewable: true,
+      content: truncated ? formatted.substring(0, MAX_PREVIEW_BYTES) : formatted,
+      truncated,
+    };
   } catch {
     return { previewable: false, reason: "추출 결과 파일을 찾을 수 없습니다" };
   }
@@ -87,14 +103,14 @@ export async function GET(
       return errorResponse("삭제된 문서는 미리볼 수 없습니다", 410);
     }
 
-    const [original, extracted] = await Promise.all([
-      getOriginalContent(doc.user_key, doc.file_id, doc.file_format),
-      getExtractedContent(doc.user_key, doc.file_name, doc.file_status),
+    const [extracted, original] = await Promise.all([
+      getExtractedText(doc.user_key, doc.file_name, doc.file_status),
+      getOriginalJson(doc.user_key, doc.file_name, doc.file_status),
     ]);
 
     return NextResponse.json({
-      original,
       extracted,
+      original,
       size: Number(doc.file_size),
     });
   } catch (error) {

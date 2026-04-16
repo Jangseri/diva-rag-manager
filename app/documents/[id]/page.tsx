@@ -215,7 +215,7 @@ function PreviewCard({
   preview: PreviewResponse | null;
   loading: boolean;
 }) {
-  const [tab, setTab] = useState<"original" | "extracted">("original");
+  const [tab, setTab] = useState<"original" | "extracted">("extracted");
   const section = preview ? preview[tab] : null;
 
   return (
@@ -226,16 +226,6 @@ function PreviewCard({
 
         <div className="ml-4 flex gap-1">
           <button
-            onClick={() => setTab("original")}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-              tab === "original"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            원본
-          </button>
-          <button
             onClick={() => setTab("extracted")}
             className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
               tab === "extracted"
@@ -244,6 +234,16 @@ function PreviewCard({
             }`}
           >
             추출 텍스트
+          </button>
+          <button
+            onClick={() => setTab("original")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+              tab === "original"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            원본 (JSON)
           </button>
         </div>
 
