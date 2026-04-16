@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -13,22 +13,12 @@ import { formatDate } from "@/lib/format";
 import type { SearchResponse, SearchResult } from "@/types";
 import {
   Search,
-  FileText,
-  Sparkles,
   Blend,
-  BarChart3,
-  ArrowDown,
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-
-interface AllSearchResults {
-  bm25: SearchResponse | null;
-  vector: SearchResponse | null;
-  hybrid: SearchResponse | null;
-}
 
 function highlightText(text: string, query: string): React.ReactNode {
   if (!query.trim()) return text;
@@ -63,7 +53,7 @@ export default function SearchPage() {
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [topK, setTopK] = useState(5);
   const [isSearching, setIsSearching] = useState(false);
-  const [results, setResults] = useState<AllSearchResults | null>(null);
+  const [results, setResults] = useState<SearchResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleSearch = async () => {
@@ -76,12 +66,12 @@ export default function SearchPage() {
     setIsSearching(true);
     setErrorMessage(null);
     try {
-      const [bm25, vector, hybrid] = await Promise.all([
-        searchDocuments({ query: trimmed, method: "bm25", top_k: topK }),
-        searchDocuments({ query: trimmed, method: "vector", top_k: topK }),
-        searchDocuments({ query: trimmed, method: "hybrid", top_k: topK }),
-      ]);
-      setResults({ bm25, vector, hybrid });
+      const hybrid = await searchDocuments({
+        query: trimmed,
+        method: "hybrid",
+        top_k: topK,
+      });
+      setResults(hybrid);
       setSubmittedQuery(trimmed);
     } catch (error) {
       const msg =
@@ -106,7 +96,7 @@ export default function SearchPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">RAG 검색</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          BM25와 Vector 검색 결과를 결합하여 Hybrid 최종 결과를 제공합니다.
+          Hybrid 검색으로 문서에서 관련 내용을 찾아줍니다.
         </p>
       </div>
 
@@ -187,54 +177,15 @@ export default function SearchPage() {
       {isSearching && <SearchSkeleton />}
 
       {!isSearching && results && (
-        <div className="space-y-6">
-          {/* BM25 + Vector (2열) */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* BM25 */}
-            <ResultColumn
-              title="BM25"
-              subtitle="키워드 기반 검색"
-              icon={<FileText className="h-4 w-4" />}
-              response={results.bm25}
-              color="blue"
-              query={submittedQuery}
-            />
-
-            {/* Vector */}
-            <ResultColumn
-              title="Vector"
-              subtitle="의미 기반 검색"
-              icon={<Sparkles className="h-4 w-4" />}
-              response={results.vector}
-              color="purple"
-              query={submittedQuery}
-            />
-          </div>
-
-          {/* 화살표 */}
-          <div className="flex items-center justify-center gap-3">
-            <div className="h-px flex-1 bg-border" />
-            <div className="flex items-center gap-2 rounded-full border bg-muted px-4 py-1.5">
-              <ArrowDown className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">
-                BM25 + Vector 결합
-              </span>
-              <ArrowDown className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-
-          {/* Hybrid (최종 결과) */}
-          <ResultColumn
-            title="Hybrid"
-            subtitle="최종 검색 결과"
-            icon={<Blend className="h-4 w-4" />}
-            response={results.hybrid}
-            color="emerald"
-            isFinal
-            query={submittedQuery}
-          />
-        </div>
+        <ResultColumn
+          title="Hybrid"
+          subtitle="검색 결과"
+          icon={<Blend className="h-4 w-4" />}
+          response={results}
+          color="emerald"
+          isFinal
+          query={submittedQuery}
+        />
       )}
 
       {/* Initial State */}
@@ -246,7 +197,7 @@ export default function SearchPage() {
             </div>
             <p className="mt-4 text-sm font-medium">검색어를 입력하세요</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              BM25, Vector 검색 후 Hybrid로 최종 결과를 확인할 수 있습니다.
+              Hybrid 검색으로 관련 문서를 찾아드립니다.
             </p>
           </CardContent>
         </Card>
@@ -256,16 +207,6 @@ export default function SearchPage() {
 }
 
 const colorMap = {
-  blue: {
-    badge: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300",
-    header: "border-blue-200 dark:border-blue-800",
-    bar: "bg-blue-500",
-  },
-  purple: {
-    badge: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300",
-    header: "border-purple-200 dark:border-purple-800",
-    bar: "bg-purple-500",
-  },
   emerald: {
     badge: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300",
     header: "border-emerald-200 dark:border-emerald-800",
@@ -286,7 +227,7 @@ function ResultColumn({
   subtitle: string;
   icon: React.ReactNode;
   response: SearchResponse | null;
-  color: "blue" | "purple" | "emerald";
+  color: "emerald";
   isFinal?: boolean;
   query: string;
 }) {
@@ -404,18 +345,7 @@ function ResultItem({
 }
 
 function SearchSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ColumnSkeleton />
-        <ColumnSkeleton />
-      </div>
-      <div className="flex justify-center">
-        <Skeleton className="h-8 w-48 rounded-full" />
-      </div>
-      <ColumnSkeleton />
-    </div>
-  );
+  return <ColumnSkeleton />;
 }
 
 function ColumnSkeleton() {
