@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  experimental: {
+    // proxy.ts가 존재하면 Next.js는 body를 버퍼링하며 기본 10MB에서 잘림.
+    // 업로드 라우트의 contentLength 상한(MAX_FILE_SIZE_BYTES * 10 = 1GB)과 동일하게 맞춤.
+    proxyClientMaxBodySize: "1gb",
+  },
   // Pino transport는 동적 로딩이라 tracing이 감지 못함 → 명시적으로 포함
   outputFileTracingIncludes: {
     "/**/*": [

@@ -16,7 +16,11 @@ import { cn } from "@/lib/utils";
 import { validateFileFormat, validateFileSize } from "@/lib/validators/document";
 import { formatFileSize } from "@/lib/format";
 import { uploadDocuments } from "@/lib/api-client";
+import { MAX_FILE_SIZE_MB } from "@/lib/constants";
 import { toast } from "sonner";
+
+// 서버 route.ts의 `contentLength > MAX_FILE_SIZE_BYTES * 10` 상한과 동일
+const TOTAL_UPLOAD_LIMIT_BYTES = MAX_FILE_SIZE_MB * 10 * 1024 * 1024;
 
 interface UploadDialogProps {
   open: boolean;
@@ -109,7 +113,10 @@ export function DocumentUploadDialog({
     }
   };
 
-  const validFileCount = files.filter((f) => !f.error).length;
+  const validFiles = files.filter((f) => !f.error);
+  const validFileCount = validFiles.length;
+  const totalSize = validFiles.reduce((sum, f) => sum + f.file.size, 0);
+  const exceedsTotal = totalSize > TOTAL_UPLOAD_LIMIT_BYTES;
 
   return (
     <Dialog open={open} onOpenChange={uploading ? undefined : onOpenChange}>
@@ -117,8 +124,8 @@ export function DocumentUploadDialog({
         <DialogHeader>
           <DialogTitle>파일 업로드</DialogTitle>
           <DialogDescription>
-            PDF, DOCX, TXT, HWP, XLSX, PPTX 파일을 업로드할 수 있습니다. (최대
-            100MB)
+            파일당 최대 100MB, 한 번에 여러 파일 업로드 시 합계 최대 1GB까지
+            가능합니다.
           </DialogDescription>
         </DialogHeader>
 
@@ -161,43 +168,68 @@ export function DocumentUploadDialog({
 
           {/* File List */}
           {files.length > 0 && (
-            <div className="max-h-48 space-y-2 overflow-y-auto">
-              {files.map((item, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md border px-3 py-2",
-                    item.error ? "border-destructive/50 bg-destructive/5" : "border-border"
-                  )}
-                >
-                  {item.error ? (
-                    <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
-                  ) : (
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{item.file.name}</p>
+            <div className="space-y-2">
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {files.map((item, index) => (
+                  <div
+                    key={index}
+                    className={cn(
+                      "flex items-center gap-3 rounded-md border px-3 py-2",
+                      item.error
+                        ? "border-destructive/50 bg-destructive/5"
+                        : "border-border"
+                    )}
+                  >
                     {item.error ? (
-                      <p className="text-xs text-destructive">{item.error}</p>
+                      <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
                     ) : (
-                      <p className="text-xs text-muted-foreground">
-                        {formatFileSize(item.file.size)}
-                      </p>
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{item.file.name}</p>
+                      {item.error ? (
+                        <p className="text-xs text-destructive">{item.error}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSize(item.file.size)}
+                        </p>
+                      )}
+                    </div>
+                    {!uploading && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFile(index);
+                        }}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     )}
                   </div>
-                  {!uploading && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFile(index);
-                      }}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                ))}
+              </div>
+              {validFileCount > 0 && (
+                <div className="flex items-center justify-between px-1 text-xs">
+                  <span className="text-muted-foreground">
+                    합계{" "}
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        exceedsTotal && "font-medium text-destructive"
+                      )}
                     >
-                      <X className="h-4 w-4" />
-                    </button>
+                      {formatFileSize(totalSize)}
+                    </span>{" "}
+                    / {formatFileSize(TOTAL_UPLOAD_LIMIT_BYTES)}
+                  </span>
+                  {exceedsTotal && (
+                    <span className="font-medium text-destructive">
+                      총 용량 한도를 초과했습니다
+                    </span>
                   )}
                 </div>
-              ))}
+              )}
             </div>
           )}
 
@@ -225,7 +257,7 @@ export function DocumentUploadDialog({
           </Button>
           <Button
             onClick={handleUpload}
-            disabled={validFileCount === 0 || uploading}
+            disabled={validFileCount === 0 || uploading || exceedsTotal}
           >
             {uploading ? "업로드 중..." : `업로드 (${validFileCount}개)`}
           </Button>
