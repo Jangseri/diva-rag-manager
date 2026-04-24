@@ -2,6 +2,166 @@
 
 ---
 
+## 2026-04-24
+
+### 1. 프로덕션 환경 파일 로깅 복원
+
+**문제:** 프로덕션은 stdout 전용으로 로깅하고 있어 서버에 로그 파일이
+쌓이지 않음. `docker logs`로만 확인 가능해 운영 중 로그 추적이 불편함.
+
+**수정:**
+- `lib/logger.ts`: 프로덕션 분기에 `pino-roll` transport 2개 추가
+  (`logs/app.log` info 이상 / `logs/error.log` error 전용, daily 로테이션,
+  파일당 10MB). stdout JSON 출력은 유지하여 `docker logs` 호환성 보존.
+- `docker-compose.yml`의 `./logs:/app/logs` 볼륨 마운트와 연동되어
+  호스트 `./logs/`에 `app.YYYY-MM-DD.N.log` 형태로 적재됨.
+
+---
+
+## 2026-04-23
+
+### 1. 대용량 파일 업로드 실패 수정
+
+**문제:** 10MB를 초과하는 파일 업로드 시 `Failed to parse body as FormData:
+expected boundary after body` 에러로 실패. Next.js 16에서 `proxy.ts`가
+존재할 경우 request body가 기본 10MB에서 잘려나가 multipart 파싱 실패.
+
+**수정:**
+- `next.config.ts`: `experimental.proxyClientMaxBodySize: "1gb"` 추가
+  (서버 `route.ts:60`의 `contentLength > MAX_FILE_SIZE_BYTES * 10` 상한과 일치)
+
+---
+
+### 2. 업로드 다이얼로그에 용량 한도 표시
+
+**문제:** 파일당 100MB / 합계 1GB 제한이 있으나 사용자가 인지할 방법 없음
+
+**수정:**
+- `components/documents/document-upload-dialog.tsx`:
+  - Description 문구 변경: "파일당 최대 100MB, 한 번에 여러 파일 업로드 시
+    합계 최대 1GB까지 가능합니다."
+  - 파일 목록 하단에 `합계 X MB / 1.0 GB` 실시간 표시
+  - 합계 한도 초과 시 붉은색 경고 문구 노출 + 업로드 버튼 비활성화
+
+---
+
+## 2026-04-16
+
+### 1. 삭제 수명주기(DELETE lifecycle) 병렬 처리 + INDEX confirmation
+
+**요청:** 삭제 요청 시 extract/index 양측 confirmation을 병렬로 처리하고,
+확인 지연을 감지할 수 있는 타임아웃 메커니즘 필요
+
+**수정:**
+- `prisma/schema.prisma`: `deletion_confirmations` 테이블 신설
+- `prisma/migrate_20260416_deletion_confirmations.sql`: 마이그레이션 스크립트
+- `lib/services/deletion-gate.ts`: 삭제 confirmation 게이트 서비스 신설
+- `lib/services/timeout-job.ts`: 지연된 confirmation을 스캔하는 주기 잡 신설
+  (`instrumentation.ts`에서 부팅 시 기동)
+- `lib/services/event-consumer.ts`: extract/index 이벤트 소비 로직 확장
+- `app/api/documents/[id]/route.ts`, `bulk-delete/route.ts`: 삭제 흐름 개편
+- `components/documents/file-status-badge.tsx`, `types/index.ts`: 삭제
+  관련 상태 추가
+- `PROPOSAL_DELETE_LIFECYCLE_PARALLEL.md`: 설계 제안서 추가
+
+---
+
+### 2. 미리보기 탭 개편 + collection 기본값 변경
+
+**수정:**
+- `app/api/documents/[id]/preview/route.ts`: 미리보기 API 구조 개편
+  (원본/추출 섹션 분리)
+- `app/documents/[id]/page.tsx`: 미리보기 탭 UI 개편, collection 기본값 변경
+
+---
+
+### 3. RAG 검색 결과에서 Hybrid 단독 표시
+
+**요청:** 검색 결과 화면에서 Vector/BM25 분리 표시 대신 Hybrid 결과만
+단독으로 보여주기
+
+**수정:**
+- `app/search/page.tsx`: 다중 메서드 탭 구조 제거, Hybrid 결과만 표시
+
+---
+
+### 4. 검색 결과 유사도 퍼센트 표시 제거
+
+**수정:**
+- `app/search/page.tsx`: 각 결과 항목의 유사도 퍼센트 뱃지 제거
+
+---
+
+### 5. 업로드 허용 확장자 확대 (JPG/JPEG/PNG)
+
+**수정:**
+- `lib/constants.ts`: `ALLOWED_FILE_FORMATS`, `ALLOWED_MIME_TYPES`에
+  jpg/jpeg/png 추가
+- `components/documents/document-upload-dialog.tsx`: accept 속성 및
+  안내 문구 업데이트
+- `components/documents/file-format-icon.tsx`: 이미지 포맷 아이콘 매핑 추가
+- `__tests__/lib/validators.test.ts`, `DEVELOPMENT.md` 동기화
+
+---
+
+### 6. 문서 데이터 reset SQL 추가
+
+**수정:**
+- `prisma/reset_documents_20260416.sql`: 문서 데이터 초기화용 SQL 추가
+
+---
+
+## 2026-04-15
+
+### 1. docs-extract-system 연동 스펙 v1 적용
+
+**요청:** 외부 문서 추출 시스템(docs-extract-system)과의 연동 스펙 v1을
+반영하여 이벤트 페이로드/ID 체계/에러 코드 체계 정리
+
+**수정:**
+- `prisma/schema.prisma` + `prisma/migrate_20260415_spec_v1.sql`: 스펙 v1
+  기준 스키마 갱신
+- `lib/id.ts` 신설 (기존 `lib/tsid.ts` 대체), `lib/error-codes.ts` 신설
+- `lib/services/event-publisher.ts`, `event-consumer.ts`: 이벤트
+  페이로드/토픽 개편
+- `lib/services/document-service.ts`, `lib/file-storage.ts`: 서비스 계층
+  스펙 v1 정렬
+- `app/api/documents/*`: 라우트 응답/에러 포맷 정리
+- 테스트/팩토리 전반 동기화
+
+---
+
+### 2. Hybrid Search API 스펙 v2 적용
+
+**수정:**
+- `lib/services/milvus-broker.ts`: Hybrid Search 요청/응답 스펙 v2 반영
+- `.env.example`, `.env.production.example`: 관련 환경변수 갱신
+
+---
+
+### 3. Spec v1 초기화용 reset SQL 추가
+
+**수정:**
+- `prisma/reset_20260415_spec_v1.sql`: 스펙 v1 마이그레이션 시점 초기화 SQL
+
+---
+
+### 4. 인프라/배포 안정화
+
+**문제:** Docker 환경에서 Next.js standalone 빌드 시 pino transport 누락,
+Alpine에서 Prisma OpenSSL 3.x 미지원, 로그 파일 권한 문제 등 다수 이슈
+
+**수정:**
+- `next.config.ts`: `outputFileTracingIncludes`로 pino transport 및
+  Prisma 관련 모듈을 standalone 번들에 명시적으로 포함
+- `docker/Dockerfile`, `prisma/schema.prisma`: Prisma OpenSSL 3.x 지원
+- `lib/logger.ts` + `docker-compose.yml`: 프로덕션은 stdout 전용 로깅으로
+  전환, Docker json-file 드라이버 로그 로테이션 설정
+- `docker-compose.yml`: static subnet(`172.24.17.0/24`) 지정, 공유
+  스토리지 쓰기를 위한 UID/GID(`1007:1012`) 설정
+
+---
+
 ## 2026-04-10
 
 ### 1. DB 연결 오류 수정

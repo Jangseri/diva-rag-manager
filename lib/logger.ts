@@ -48,10 +48,41 @@ function createPino() {
     });
   }
 
-  // 프로덕션: transport 없이 stdout JSON (Docker logging driver가 관리)
+  // 프로덕션: stdout JSON(Docker logs용) + 파일 로테이션
   return pino({
     level: "info",
     base: { env: "production" },
+    transport: {
+      targets: [
+        {
+          target: "pino/file",
+          level: "info",
+          options: { destination: 1 },
+        },
+        {
+          target: "pino-roll",
+          level: "info",
+          options: {
+            file: path.join(logDir, "app.log"),
+            frequency: "daily",
+            size: "10m",
+            mkdir: true,
+            dateFormat: "yyyy-MM-dd",
+          },
+        },
+        {
+          target: "pino-roll",
+          level: "error",
+          options: {
+            file: path.join(logDir, "error.log"),
+            frequency: "daily",
+            size: "10m",
+            mkdir: true,
+            dateFormat: "yyyy-MM-dd",
+          },
+        },
+      ],
+    },
   });
 }
 
