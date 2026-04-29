@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
       "node_modules/pino-roll/**",
       "node_modules/pino-abstract-transport/**",
       "node_modules/split2/**",
+      "node_modules/date-fns/**",
       "node_modules/thread-stream/**",
       "node_modules/sonic-boom/**",
       "node_modules/on-exit-leak-free/**",
