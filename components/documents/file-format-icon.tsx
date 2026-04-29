@@ -6,6 +6,8 @@ import {
   Presentation,
   Image as ImageIcon,
   File,
+  FileCode,
+  Link as LinkIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,20 +20,25 @@ const formatConfig: Record<
   pptx: { icon: Presentation, color: "text-orange-600", bg: "bg-orange-50 dark:bg-orange-950" },
   xlsx: { icon: FileSpreadsheet, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-950" },
   hwp: { icon: FileText, color: "text-sky-600", bg: "bg-sky-50 dark:bg-sky-950" },
+  hwpx: { icon: FileText, color: "text-sky-600", bg: "bg-sky-50 dark:bg-sky-950" },
   txt: { icon: FileText, color: "text-gray-600", bg: "bg-gray-50 dark:bg-gray-800" },
+  md: { icon: FileText, color: "text-gray-700", bg: "bg-gray-50 dark:bg-gray-800" },
+  json: { icon: FileCode, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-950" },
   jpg: { icon: ImageIcon, color: "text-pink-600", bg: "bg-pink-50 dark:bg-pink-950" },
   jpeg: { icon: ImageIcon, color: "text-pink-600", bg: "bg-pink-50 dark:bg-pink-950" },
   png: { icon: ImageIcon, color: "text-purple-600", bg: "bg-purple-50 dark:bg-purple-950" },
+  url: { icon: LinkIcon, color: "text-indigo-600", bg: "bg-indigo-50 dark:bg-indigo-950" },
 };
 
 export function FileFormatIcon({
   format,
   size = "md",
 }: {
-  format: string;
+  format: string | null | undefined;
   size?: "sm" | "md" | "lg";
 }) {
-  const config = formatConfig[format] || {
+  const key = format || "url";
+  const config = formatConfig[key] || {
     icon: File,
     color: "text-gray-500",
     bg: "bg-gray-50",
@@ -63,11 +70,11 @@ export function FileFormatIcon({
   );
 }
 
-export function FileFormatBadge({ format }: { format: string }) {
+export function FileFormatBadge({ format }: { format: string | null | undefined }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase text-muted-foreground">
       <FileFormatIcon format={format} size="sm" />
-      {format}
+      {format || "URL"}
     </span>
   );
 }

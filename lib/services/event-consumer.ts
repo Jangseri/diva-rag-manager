@@ -138,6 +138,14 @@ async function handleExtractFailed(event: BaseEvent) {
     "추출 실패 수신"
   );
 
+  // URL 케이스는 stream 재발행이 불가능 (HTTP 진입) — 즉시 FAILED 고정
+  if (doc.source_type === "url") {
+    log.error({ file_id }, "URL 케이스 추출 재시도 미지원 → FAILED 고정");
+    return updateFileStatus(file_id, "FAILED", {
+      last_error_code: error_code || null,
+    });
+  }
+
   if (retryable && doc.retry_count < MAX_RETRY) {
     const newRetryCount = doc.retry_count + 1;
     log.info({ file_id, retry_count: newRetryCount }, "추출 재시도 재발행");
@@ -147,7 +155,7 @@ async function handleExtractFailed(event: BaseEvent) {
       retry_count: newRetryCount,
     });
 
-    if (doc.origin_path) {
+    if (doc.origin_path && doc.file_format) {
       await publishDocumentUploaded({
         file_id: doc.file_id,
         user_key: doc.user_key,
@@ -158,7 +166,7 @@ async function handleExtractFailed(event: BaseEvent) {
         origin_path: doc.origin_path,
       });
     } else {
-      log.error({ file_id }, "origin_path 없어 재발행 불가 → FAILED 고정");
+      log.error({ file_id }, "origin_path/file_format 없어 재발행 불가 → FAILED 고정");
       await updateFileStatus(file_id, "FAILED", {
         last_error_code: error_code || "NO_ORIGIN_PATH",
       });
@@ -202,6 +210,15 @@ async function handleIndexFailed(event: BaseEvent) {
     "인덱싱 실패 수신"
   );
 
+  // URL 케이스는 stream 재발행이 불가능 (HTTP 진입) — 즉시 INDEX_FAILED 고정
+  if (doc.source_type === "url") {
+    log.error({ file_id }, "URL 케이스 인덱싱 재시도 미지원 → INDEX_FAILED 고정");
+    return updateFileStatus(file_id, "INDEX_FAILED", {
+      last_error_code: error_code || null,
+      updt_nm: "milvus-indexer",
+    });
+  }
+
   if (retryable && doc.retry_count < MAX_RETRY) {
     const newRetryCount = doc.retry_count + 1;
     log.info({ file_id, retry_count: newRetryCount }, "인덱싱 재시도 재발행");
@@ -213,7 +230,7 @@ async function handleIndexFailed(event: BaseEvent) {
       updt_nm: "milvus-indexer",
     });
 
-    if (doc.origin_path) {
+    if (doc.origin_path && doc.file_format) {
       await publishDocumentUploaded({
         file_id: doc.file_id,
         user_key: doc.user_key,
@@ -224,7 +241,7 @@ async function handleIndexFailed(event: BaseEvent) {
         origin_path: doc.origin_path,
       });
     } else {
-      log.error({ file_id }, "origin_path 없어 재발행 불가 → INDEX_FAILED 고정");
+      log.error({ file_id }, "origin_path/file_format 없어 재발행 불가 → INDEX_FAILED 고정");
       await updateFileStatus(file_id, "INDEX_FAILED", {
         last_error_code: error_code || "NO_ORIGIN_PATH",
         updt_nm: "milvus-indexer",

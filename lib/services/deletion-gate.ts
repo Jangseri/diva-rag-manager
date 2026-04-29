@@ -149,7 +149,7 @@ export async function evaluateDeletion(file_id: string) {
 
 async function finalizeSuccess(file_id: string) {
   const doc = await prisma.document.findUnique({ where: { file_id } });
-  if (doc) {
+  if (doc && doc.source_type !== "url" && doc.file_format) {
     await deleteFile(ORIGIN_PATH, doc.user_key, doc.file_id, doc.file_format).catch(
       (err) => log.error({ err, file_id }, "원본 파일 삭제 실패")
     );

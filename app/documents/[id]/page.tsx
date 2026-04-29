@@ -28,6 +28,7 @@ import {
   FileType,
   Eye,
   AlertCircle,
+  Link as LinkIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -54,8 +55,11 @@ export default function DocumentDetailPage({
         if (cancelled) return;
         setDocument(result.data);
 
-        // 미리보기 시도 (ACTIVE 상태만)
-        if (result.data.status === "ACTIVE") {
+        // 미리보기 시도 (ACTIVE 상태이며 파일 케이스만)
+        if (
+          result.data.status === "ACTIVE" &&
+          result.data.source_type !== "url"
+        ) {
           setPreviewLoading(true);
           try {
             const p = await fetchPreview(id);
@@ -104,6 +108,9 @@ export default function DocumentDetailPage({
 
   if (!document) return null;
 
+  const isUrl = document.source_type === "url";
+  const iconFormat = isUrl ? "url" : document.file_format;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       {/* Back Button */}
@@ -120,9 +127,23 @@ export default function DocumentDetailPage({
         {/* Header: 파일명 + 뱃지 + 액션 */}
         <div className="px-6 py-5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileFormatIcon format={document.file_format} size="lg" />
-              <h1 className="text-lg font-semibold">{document.file_name}</h1>
+            <div className="flex items-center gap-3 min-w-0">
+              <FileFormatIcon format={iconFormat} size="lg" />
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-semibold">
+                  {document.file_name}
+                </h1>
+                {isUrl && document.source_url && (
+                  <a
+                    href={document.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate text-xs text-muted-foreground hover:text-primary hover:underline"
+                  >
+                    {document.source_url}
+                  </a>
+                )}
+              </div>
               <FileStatusBadge status={document.file_status} />
               {document.status === "DELETED" && (
                 <span className="rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-destructive dark:bg-red-950">
@@ -131,18 +152,33 @@ export default function DocumentDetailPage({
               )}
             </div>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() =>
-                  window.open(getDownloadUrl(document.file_id), "_blank")
-                }
-                disabled={document.status === "DELETED"}
-              >
-                <Download className="h-4 w-4" />
-                다운로드
-              </Button>
+              {!isUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() =>
+                    window.open(getDownloadUrl(document.file_id), "_blank")
+                  }
+                  disabled={document.status === "DELETED"}
+                >
+                  <Download className="h-4 w-4" />
+                  다운로드
+                </Button>
+              )}
+              {isUrl && document.source_url && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() =>
+                    window.open(document.source_url!, "_blank", "noopener")
+                  }
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  원본 열기
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -169,14 +205,16 @@ export default function DocumentDetailPage({
             />
             <MetadataItem
               icon={FileType}
-              label="파일 형식"
-              value={document.file_format.toUpperCase()}
+              label="형식"
+              value={isUrl ? "URL" : (document.file_format ?? "—").toUpperCase()}
             />
-            <MetadataItem
-              icon={HardDrive}
-              label="파일 크기"
-              value={formatFileSize(document.file_size)}
-            />
+            {!isUrl && (
+              <MetadataItem
+                icon={HardDrive}
+                label="파일 크기"
+                value={formatFileSize(document.file_size)}
+              />
+            )}
             <MetadataItem
               icon={Calendar}
               label="등록일시"
@@ -191,10 +229,12 @@ export default function DocumentDetailPage({
         </CardContent>
       </Card>
 
-      {/* Preview */}
-      {document.status !== "DELETED" && document.status !== "DELETING" && (
-        <PreviewCard preview={preview} loading={previewLoading} />
-      )}
+      {/* Preview (파일 케이스만) */}
+      {!isUrl &&
+        document.status !== "DELETED" &&
+        document.status !== "DELETING" && (
+          <PreviewCard preview={preview} loading={previewLoading} />
+        )}
 
       {/* Delete Dialog */}
       <DocumentDeleteDialog

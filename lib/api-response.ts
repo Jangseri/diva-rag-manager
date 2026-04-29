@@ -4,6 +4,8 @@ import type { DocumentRecord, DocumentResponse } from "@/types";
 export function toDocumentResponse(doc: DocumentRecord): DocumentResponse {
   return {
     file_id: doc.file_id,
+    source_type: doc.source_type,
+    source_url: doc.source_url,
     file_name: doc.file_name,
     user_key: doc.user_key,
     file_format: doc.file_format,

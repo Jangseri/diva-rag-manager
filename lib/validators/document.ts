@@ -11,6 +11,8 @@ const SORTABLE_FIELDS = [
   "status",
 ] as const;
 
+const FORMAT_FILTER_VALUES = [...ALLOWED_FILE_FORMATS, "url"] as const;
+
 export const DocumentListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   size: z.coerce.number().int().refine((v) => [10, 20, 50].includes(v), {
@@ -19,7 +21,7 @@ export const DocumentListQuerySchema = z.object({
   sort: z.enum(SORTABLE_FIELDS).default("rgst_dt"),
   order: z.enum(["asc", "desc"]).default("desc"),
   search: z.string().optional(),
-  format: z.enum(ALLOWED_FILE_FORMATS).optional(),
+  format: z.enum(FORMAT_FILTER_VALUES).optional(),
   status: z.enum(["ACTIVE", "DELETING", "DELETED", "DELETE_PARTIAL_FAILURE"]).optional(),
   file_status: z
     .enum([
@@ -60,8 +62,8 @@ export function validateFileName(fileName: string): { valid: boolean; error?: st
     return { valid: false, error: "파일명이 비어있습니다" };
   }
 
-  if (fileName.length > 255) {
-    return { valid: false, error: "파일명이 255자를 초과합니다" };
+  if (fileName.length > 100) {
+    return { valid: false, error: "파일명이 100자를 초과합니다" };
   }
 
   if (INVALID_FILENAME_CHARS.test(fileName)) {

@@ -16,6 +16,8 @@ export function createDocumentRecord(
 
   return {
     file_id,
+    source_type: "file",
+    source_url: null,
     file_name: fileName,
     user_key,
     file_format: format,
@@ -37,6 +39,8 @@ export function createDocumentRecord(
 export function toDocumentResponse(record: DocumentRecord): DocumentResponse {
   return {
     file_id: record.file_id,
+    source_type: record.source_type,
+    source_url: record.source_url,
     file_name: record.file_name,
     user_key: record.user_key,
     file_format: record.file_format,

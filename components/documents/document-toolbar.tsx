@@ -65,10 +65,14 @@ export function DocumentToolbar({
             <SelectItem value="ALL">ALL</SelectItem>
             <SelectItem value="pdf">PDF</SelectItem>
             <SelectItem value="docx">DOCX</SelectItem>
-            <SelectItem value="txt">TXT</SelectItem>
-            <SelectItem value="hwp">HWP</SelectItem>
-            <SelectItem value="xlsx">XLSX</SelectItem>
             <SelectItem value="pptx">PPTX</SelectItem>
+            <SelectItem value="xlsx">XLSX</SelectItem>
+            <SelectItem value="hwp">HWP</SelectItem>
+            <SelectItem value="hwpx">HWPX</SelectItem>
+            <SelectItem value="txt">TXT</SelectItem>
+            <SelectItem value="md">MD</SelectItem>
+            <SelectItem value="json">JSON</SelectItem>
+            <SelectItem value="url">URL</SelectItem>
           </SelectContent>
         </Select>
 

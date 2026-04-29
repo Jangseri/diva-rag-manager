@@ -6,6 +6,7 @@ import { errorResponse, validationErrorResponse } from "@/lib/api-response";
 import { getCurrentUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
 import { publishDocumentDeleted } from "@/lib/services/event-publisher";
+import { deleteUrlTask } from "@/lib/services/extract-client";
 
 const log = createLogger("api/documents/bulk-delete");
 
@@ -34,11 +35,19 @@ export async function POST(request: NextRequest) {
         const doc = await initiateDeletion(id, currentUser.name);
         success.push(id);
 
-        await publishDocumentDeleted({
-          file_id: id,
-          user_key: currentUser.user_key,
-          collection_name: doc.collection_name,
-        });
+        if (doc.source_type === "url") {
+          try {
+            await deleteUrlTask(id);
+          } catch (err) {
+            log.error({ err, file_id: id }, "extract-service URL 삭제 호출 실패");
+          }
+        } else {
+          await publishDocumentDeleted({
+            file_id: id,
+            user_key: currentUser.user_key,
+            collection_name: doc.collection_name,
+          });
+        }
       } catch (error) {
         failed.push({
           file_id: id,

@@ -28,6 +28,9 @@ export async function GET(
     if (doc.status === "DELETED") {
       return errorResponse("삭제된 문서는 다운로드할 수 없습니다", 410);
     }
+    if (doc.source_type === "url" || !doc.file_format) {
+      return errorResponse("URL 항목은 다운로드할 수 없습니다", 400);
+    }
 
     const ext = doc.file_format;
     const exists = await fileExists(ORIGIN_PATH, doc.user_key, doc.file_id, ext);

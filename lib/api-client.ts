@@ -84,6 +84,17 @@ export async function uploadDocuments(
   });
 }
 
+export async function submitUrls(payload: {
+  urls: string[];
+  collection_name?: string | null;
+}): Promise<{ data: DocumentResponse[]; warnings?: string[] }> {
+  return fetchApi("/api/documents/url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function deleteDocument(
   id: string
 ): Promise<{ success: boolean; data: DocumentResponse }> {

@@ -20,6 +20,15 @@ interface CreateDocumentInput {
   rgst_nm: string;
 }
 
+interface CreateUrlDocumentInput {
+  file_id: string;
+  file_name: string;
+  user_key: string;
+  source_url: string;
+  collection_name?: string | null;
+  rgst_nm: string;
+}
+
 export async function listDocuments(
   query: DocumentListQuery
 ): Promise<ListResult> {
@@ -32,7 +41,11 @@ export async function listDocuments(
     where.file_status = file_status;
   }
   if (format) {
-    where.file_format = format;
+    if (format === "url") {
+      where.source_type = "url";
+    } else {
+      where.file_format = format;
+    }
   }
   if (search) {
     where.file_name = { contains: search };
@@ -72,12 +85,29 @@ export async function findDuplicateDocument(
   return doc as DocumentRecord | null;
 }
 
+export async function findDuplicateUrlDocument(
+  userKey: string,
+  sourceUrl: string
+): Promise<DocumentRecord | null> {
+  const doc = await prisma.document.findFirst({
+    where: {
+      user_key: userKey,
+      source_url: sourceUrl,
+      source_type: "url",
+      status: "ACTIVE",
+    },
+  });
+  return doc as DocumentRecord | null;
+}
+
 export async function createDocument(
   input: CreateDocumentInput
 ): Promise<DocumentRecord> {
   const doc = await prisma.document.create({
     data: {
       file_id: input.file_id,
+      source_type: "file",
+      source_url: null,
       file_name: input.file_name,
       user_key: input.user_key,
       file_format: input.file_format,
@@ -85,6 +115,31 @@ export async function createDocument(
       file_status: "UPLOADED",
       collection_name: input.collection_name ?? null,
       origin_path: input.origin_path,
+      retry_count: 0,
+      last_error_code: null,
+      rgst_nm: input.rgst_nm,
+      status: "ACTIVE",
+      updt_nm: input.rgst_nm,
+    },
+  });
+  return doc as DocumentRecord;
+}
+
+export async function createUrlDocument(
+  input: CreateUrlDocumentInput
+): Promise<DocumentRecord> {
+  const doc = await prisma.document.create({
+    data: {
+      file_id: input.file_id,
+      source_type: "url",
+      source_url: input.source_url,
+      file_name: input.file_name,
+      user_key: input.user_key,
+      file_format: null,
+      file_size: BigInt(0),
+      file_status: "UPLOADED",
+      collection_name: input.collection_name ?? null,
+      origin_path: null,
       retry_count: 0,
       last_error_code: null,
       rgst_nm: input.rgst_nm,

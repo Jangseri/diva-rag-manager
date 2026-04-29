@@ -7,6 +7,7 @@ import { toDocumentResponse, errorResponse } from "@/lib/api-response";
 import { getCurrentUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
 import { publishDocumentDeleted } from "@/lib/services/event-publisher";
+import { deleteUrlTask } from "@/lib/services/extract-client";
 import type { DocumentRecord } from "@/types";
 
 const log = createLogger("api/documents/[id]");
@@ -40,14 +41,27 @@ export async function DELETE(
 
     // 삭제 프로세스 개시 (status=DELETING, confirmation row 생성)
     const doc = (await initiateDeletion(id, currentUser.name)) as DocumentRecord;
-    log.info({ file_id: id, userKey: currentUser.user_key }, "삭제 프로세스 개시");
+    log.info(
+      { file_id: id, userKey: currentUser.user_key, source_type: doc.source_type },
+      "삭제 프로세스 개시"
+    );
 
-    // DOCUMENT_DELETED 발행 → extract, milvus가 각자 처리 후 confirmation 발행
-    await publishDocumentDeleted({
-      file_id: id,
-      user_key: currentUser.user_key,
-      collection_name: doc.collection_name,
-    });
+    if (doc.source_type === "url") {
+      // URL 케이스: HTTP DELETE로 extract-service 호출 (스트림 발행 X)
+      try {
+        await deleteUrlTask(id);
+      } catch (err) {
+        log.error({ err, file_id: id }, "extract-service URL 삭제 호출 실패");
+        // 호출 실패해도 status=DELETING 유지 → gate 타임아웃 시 PARTIAL_FAILURE
+      }
+    } else {
+      // FILE 케이스: DOCUMENT_DELETED 발행 → extract, milvus가 각자 처리
+      await publishDocumentDeleted({
+        file_id: id,
+        user_key: currentUser.user_key,
+        collection_name: doc.collection_name,
+      });
+    }
 
     // 202 Accepted: 처리 접수됨, 실제 삭제는 confirmation gate 통과 후
     return NextResponse.json(

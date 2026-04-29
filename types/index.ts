@@ -1,5 +1,21 @@
-export const FILE_FORMATS = ["pdf", "docx", "txt", "hwp", "xlsx", "pptx"] as const;
+export const FILE_FORMATS = [
+  "pdf",
+  "docx",
+  "pptx",
+  "xlsx",
+  "hwp",
+  "hwpx",
+  "txt",
+  "md",
+  "json",
+  "jpg",
+  "jpeg",
+  "png",
+] as const;
 export type FileFormat = (typeof FILE_FORMATS)[number];
+
+export const SOURCE_TYPES = ["file", "url"] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export const FILE_STATUSES = [
   "UPLOADED",
@@ -24,9 +40,11 @@ export type SearchMethod = (typeof SEARCH_METHODS)[number];
 
 export interface DocumentRecord {
   file_id: string;
+  source_type: string;
+  source_url: string | null;
   file_name: string;
   user_key: string;
-  file_format: string;
+  file_format: string | null;
   file_size: bigint;
   file_status: string;
   collection_name: string | null;
@@ -49,9 +67,11 @@ export interface DocumentListResponse {
 
 export interface DocumentResponse {
   file_id: string;
+  source_type: string;
+  source_url: string | null;
   file_name: string;
   user_key: string;
-  file_format: string;
+  file_format: string | null;
   file_size: string;
   file_status: string;
   collection_name: string | null;

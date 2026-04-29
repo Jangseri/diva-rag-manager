@@ -10,9 +10,11 @@ datasource db {
 
 model Document {
   file_id         String   @id @db.VarChar(26)
+  source_type     String   @default("file") @db.VarChar(10)
+  source_url      String?  @db.VarChar(2048)
   file_name       String   @db.VarChar(500)
   user_key        String   @db.VarChar(100)
-  file_format     String   @db.VarChar(20)
+  file_format     String?  @db.VarChar(20)
   file_size       BigInt   @db.BigInt
   file_status     String   @default("UPLOADED") @db.VarChar(20)
   collection_name String?  @db.VarChar(200)
@@ -25,6 +27,7 @@ model Document {
   updt_dt         DateTime @updatedAt @db.DateTime(0)
   updt_nm         String   @db.VarChar(100)
 
+  @@index([source_type])
   @@map("document_files")
 }
 

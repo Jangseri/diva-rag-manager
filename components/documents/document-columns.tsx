@@ -57,19 +57,30 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
     },
     {
       accessorKey: "file_name",
-      header: () => <div className="text-center">파일명</div>,
+      header: () => <div className="text-center">파일명 / URL</div>,
       cell: ({ row }) => {
         const doc = row.original;
+        const iconFormat = doc.source_type === "url" ? "url" : doc.file_format;
         return (
-          <div className="flex items-center gap-3">
-            <FileFormatIcon format={doc.file_format} size="sm" />
-            <Link
-              href={`/documents/${doc.file_id}`}
-              className="truncate font-medium text-foreground hover:text-primary hover:underline"
-              title={doc.file_name}
-            >
-              {doc.file_name}
-            </Link>
+          <div className="flex items-center gap-3 min-w-0">
+            <FileFormatIcon format={iconFormat} size="sm" />
+            <div className="min-w-0 flex-1">
+              <Link
+                href={`/documents/${doc.file_id}`}
+                className="block truncate font-medium text-foreground hover:text-primary hover:underline"
+                title={doc.source_url || doc.file_name}
+              >
+                {doc.file_name}
+              </Link>
+              {doc.source_type === "url" && doc.source_url && (
+                <p
+                  className="truncate text-xs text-muted-foreground"
+                  title={doc.source_url}
+                >
+                  {doc.source_url}
+                </p>
+              )}
+            </div>
           </div>
         );
       },
@@ -79,7 +90,9 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
       header: () => <div className="text-center">형식</div>,
       cell: ({ row }) => (
         <div className="text-center text-xs font-medium uppercase text-muted-foreground">
-          {row.original.file_format.toUpperCase()}
+          {row.original.source_type === "url"
+            ? "URL"
+            : (row.original.file_format ?? "—").toUpperCase()}
         </div>
       ),
     },
@@ -97,7 +110,9 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
       header: () => <div className="text-center">크기</div>,
       cell: ({ row }) => (
         <div className="text-center text-sm text-muted-foreground">
-          {formatFileSize(row.original.file_size)}
+          {row.original.source_type === "url"
+            ? "—"
+            : formatFileSize(row.original.file_size)}
         </div>
       ),
     },
@@ -141,10 +156,12 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
                 </DropdownMenuItem>
                 {doc.status !== "DELETED" && (
                   <>
-                    <DropdownMenuItem onClick={() => actions.onDownload(doc)}>
-                      <Download className="mr-2 h-4 w-4" />
-                      다운로드
-                    </DropdownMenuItem>
+                    {doc.source_type !== "url" && (
+                      <DropdownMenuItem onClick={() => actions.onDownload(doc)}>
+                        <Download className="mr-2 h-4 w-4" />
+                        다운로드
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       onClick={() => actions.onDelete(doc)}
                       className="text-destructive focus:text-destructive"
