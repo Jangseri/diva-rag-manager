@@ -62,7 +62,7 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
         const doc = row.original;
         const iconFormat = doc.source_type === "url" ? "url" : doc.file_format;
         return (
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex w-[20rem] max-w-[28rem] items-center gap-3 lg:w-[24rem] xl:w-[32rem]">
             <FileFormatIcon format={iconFormat} size="sm" />
             <div className="min-w-0 flex-1">
               <Link

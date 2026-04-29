@@ -126,32 +126,42 @@ export default function DocumentDetailPage({
       <Card>
         {/* Header: 파일명 + 뱃지 + 액션 */}
         <div className="px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <FileFormatIcon format={iconFormat} size="lg" />
-              <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold">
-                  {document.file_name}
-                </h1>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div className="shrink-0 pt-0.5">
+                <FileFormatIcon format={iconFormat} size="lg" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h1
+                    className="truncate text-lg font-semibold"
+                    title={document.file_name}
+                  >
+                    {document.file_name}
+                  </h1>
+                  <div className="shrink-0">
+                    <FileStatusBadge status={document.file_status} />
+                  </div>
+                  {document.status === "DELETED" && (
+                    <span className="shrink-0 rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-destructive dark:bg-red-950">
+                      DELETED
+                    </span>
+                  )}
+                </div>
                 {isUrl && document.source_url && (
                   <a
                     href={document.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="truncate text-xs text-muted-foreground hover:text-primary hover:underline"
+                    title={document.source_url}
+                    className="mt-0.5 block truncate text-xs text-muted-foreground hover:text-primary hover:underline"
                   >
                     {document.source_url}
                   </a>
                 )}
               </div>
-              <FileStatusBadge status={document.file_status} />
-              {document.status === "DELETED" && (
-                <span className="rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-destructive dark:bg-red-950">
-                  DELETED
-                </span>
-              )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex shrink-0 gap-2">
               {!isUrl && (
                 <Button
                   variant="outline"

@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, FileText, AlertCircle, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { validateFileFormat, validateFileSize } from "@/lib/validators/document";
@@ -36,11 +35,15 @@ interface SelectedFile {
   error?: string;
 }
 
-interface ParsedUrl {
+interface UrlChip {
+  id: string;
   raw: string;
   normalized?: string;
   error?: string;
 }
+
+let chipIdCounter = 0;
+const nextChipId = () => `chip-${Date.now()}-${++chipIdCounter}`;
 
 export function DocumentUploadDialog({
   open,
@@ -57,8 +60,10 @@ export function DocumentUploadDialog({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // URL tab state
-  const [urlText, setUrlText] = useState("");
+  const [chips, setChips] = useState<UrlChip[]>([]);
+  const [currentInput, setCurrentInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   const busy = uploading || submitting;
 
@@ -94,73 +99,172 @@ export function DocumentUploadDialog({
     [validateAndAddFiles]
   );
 
-  const handleUpload = async () => {
-    const validFiles = files.filter((f) => !f.error).map((f) => f.file);
-    if (validFiles.length === 0) return;
-
-    setUploading(true);
-    setProgress(0);
-
-    try {
-      const result = await uploadDocuments(validFiles, (percent) => {
-        setProgress(percent);
-      });
-      setProgress(100);
-
-      if (result.warnings && result.warnings.length > 0) {
-        toast.warning(
-          `${result.data.length}개 파일 업로드 완료 (${result.warnings.length}개 실패)`
-        );
-      } else {
-        toast.success(`${result.data.length}개 파일이 업로드되었습니다`);
-      }
-
-      setTimeout(() => {
-        resetAndClose();
-      }, 500);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "업로드에 실패했습니다"
+  const handleSubmit = async () => {
+    // 입력 중인 텍스트가 있으면 먼저 칩으로 변환
+    let pendingChips = chips;
+    if (currentInput.trim()) {
+      addChipsFromText(currentInput);
+      setCurrentInput("");
+      // setState 비동기 → 직접 계산해서 사용
+      const tokens = currentInput
+        .split(/[\s,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const existing = new Set(
+        chips.filter((c) => c.normalized).map((c) => c.normalized!)
       );
-      setUploading(false);
+      const newOnes: UrlChip[] = tokens.map((raw) => {
+        const v = validateAndNormalizeUrl(raw);
+        if (!v.valid) return { id: nextChipId(), raw, error: v.error };
+        if (existing.has(v.normalized!)) {
+          return { id: nextChipId(), raw, error: "이미 추가된 URL입니다" };
+        }
+        existing.add(v.normalized!);
+        return { id: nextChipId(), raw, normalized: v.normalized };
+      });
+      pendingChips = [...chips, ...newOnes];
+    }
+
+    const validFilesList = files.filter((f) => !f.error).map((f) => f.file);
+    const validUrlList = pendingChips
+      .filter((c) => !c.error && c.normalized)
+      .map((c) => c.normalized as string);
+
+    if (validFilesList.length === 0 && validUrlList.length === 0) return;
+
+    let fileSuccess = 0;
+    let fileFail = 0;
+    let urlSuccess = 0;
+    let urlFail = 0;
+    let fatalError: string | null = null;
+
+    // 1. 파일 업로드 (있으면)
+    if (validFilesList.length > 0) {
+      setUploading(true);
       setProgress(0);
+      try {
+        const result = await uploadDocuments(validFilesList, setProgress);
+        setProgress(100);
+        fileSuccess = result.data.length;
+        fileFail = result.warnings?.length ?? 0;
+      } catch (error) {
+        fatalError =
+          error instanceof Error ? error.message : "파일 업로드 실패";
+      } finally {
+        setUploading(false);
+      }
+    }
+
+    // 파일에서 치명적 실패면 URL 등록 진행하지 않음
+    if (fatalError) {
+      toast.error(fatalError);
+      setProgress(0);
+      return;
+    }
+
+    // 2. URL 등록 (있으면)
+    if (validUrlList.length > 0) {
+      setSubmitting(true);
+      try {
+        const result = await submitUrls({ urls: validUrlList });
+        urlSuccess = result.data.length;
+        urlFail = result.warnings?.length ?? 0;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "URL 등록 실패";
+        // 파일은 이미 등록됐을 수 있음 → 부분 결과 토스트 후 종료
+        if (fileSuccess > 0) {
+          toast.warning(
+            `파일 ${fileSuccess}개 등록 완료, URL 등록 실패: ${msg}`
+          );
+          setTimeout(() => resetAndClose(), 800);
+        } else {
+          toast.error(msg);
+        }
+        setSubmitting(false);
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    // 통합 결과 토스트
+    const totalSuccess = fileSuccess + urlSuccess;
+    const totalFail = fileFail + urlFail;
+    if (totalFail > 0) {
+      toast.warning(`${totalSuccess}개 등록 완료 (${totalFail}개 실패)`);
+    } else {
+      toast.success(`${totalSuccess}개가 등록되었습니다`);
+    }
+
+    setTimeout(() => resetAndClose(), 500);
+  };
+
+  const addChipsFromText = useCallback(
+    (rawText: string) => {
+      const tokens = rawText
+        .split(/[\s,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (tokens.length === 0) return;
+
+      setChips((prev) => {
+        const existing = new Set(
+          prev.filter((c) => c.normalized).map((c) => c.normalized!)
+        );
+        const next: UrlChip[] = tokens.map((raw) => {
+          const v = validateAndNormalizeUrl(raw);
+          if (!v.valid) {
+            return { id: nextChipId(), raw, error: v.error };
+          }
+          if (existing.has(v.normalized!)) {
+            return { id: nextChipId(), raw, error: "이미 추가된 URL입니다" };
+          }
+          existing.add(v.normalized!);
+          return { id: nextChipId(), raw, normalized: v.normalized };
+        });
+        return [...prev, ...next];
+      });
+    },
+    []
+  );
+
+  const commitCurrentInput = () => {
+    if (currentInput.trim()) {
+      addChipsFromText(currentInput);
+      setCurrentInput("");
     }
   };
 
-  const handleUrlSubmit = async () => {
-    const validUrls = parsedUrls
-      .filter((p) => !p.error && p.normalized)
-      .map((p) => p.normalized as string);
-
-    if (validUrls.length === 0) return;
-
-    setSubmitting(true);
-    try {
-      const result = await submitUrls({ urls: validUrls });
-
-      if (result.warnings && result.warnings.length > 0) {
-        toast.warning(
-          `${result.data.length}개 URL 등록 완료 (${result.warnings.length}개 실패)`
-        );
-      } else {
-        toast.success(`${result.data.length}개 URL이 등록되었습니다`);
+  const handleUrlInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+      if (currentInput.trim()) {
+        e.preventDefault();
+        commitCurrentInput();
       }
-
-      resetAndClose();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "URL 등록에 실패했습니다"
-      );
-    } finally {
-      setSubmitting(false);
+    } else if (e.key === "Backspace" && !currentInput && chips.length > 0) {
+      setChips((prev) => prev.slice(0, -1));
     }
+  };
+
+  const handleUrlInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text");
+    if (/[\s,;]/.test(text)) {
+      e.preventDefault();
+      addChipsFromText(currentInput + text);
+      setCurrentInput("");
+    }
+  };
+
+  const removeChip = (id: string) => {
+    setChips((prev) => prev.filter((c) => c.id !== id));
   };
 
   const resetAndClose = () => {
     setFiles([]);
     setProgress(0);
     setUploading(false);
-    setUrlText("");
+    setChips([]);
+    setCurrentInput("");
     setSubmitting(false);
     onOpenChange(false);
     onSuccess();
@@ -171,23 +275,23 @@ export function DocumentUploadDialog({
   const totalSize = validFiles.reduce((sum, f) => sum + f.file.size, 0);
   const exceedsTotal = totalSize > TOTAL_UPLOAD_LIMIT_BYTES;
 
-  // URL parsing (memoized via input)
-  const rawLines = urlText
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const parsedUrls: ParsedUrl[] = rawLines.map((raw) => {
-    const v = validateAndNormalizeUrl(raw);
-    if (!v.valid) return { raw, error: v.error };
-    return { raw, normalized: v.normalized };
-  });
-  const validUrlCount = parsedUrls.filter((p) => !p.error).length;
-  const urlOverflow = parsedUrls.length > MAX_URLS_PER_REQUEST;
-  const urlInvalidCount = parsedUrls.length - validUrlCount;
+  const validUrlCount = chips.filter((c) => !c.error).length;
+  const urlInvalidCount = chips.length - validUrlCount;
+  const urlOverflow = chips.length > MAX_URLS_PER_REQUEST;
+
+  const getSubmitLabel = () => {
+    if (uploading) return progress < 100 ? "업로드 중..." : "처리 중...";
+    if (submitting) return "URL 등록 중...";
+    const parts: string[] = [];
+    if (validFileCount > 0) parts.push(`파일 ${validFileCount}개`);
+    if (validUrlCount > 0) parts.push(`URL ${validUrlCount}개`);
+    if (parts.length === 0) return "등록";
+    return `등록 (${parts.join(" · ")})`;
+  };
 
   return (
     <Dialog open={open} onOpenChange={busy ? undefined : onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-lg overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>학습 자료 추가</DialogTitle>
           <DialogDescription>
@@ -195,7 +299,11 @@ export function DocumentUploadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => !busy && setTab(String(v))}>
+        <Tabs
+          value={tab}
+          onValueChange={(v) => !busy && setTab(String(v))}
+          className="w-full min-w-0"
+        >
           <TabsList className="w-full">
             <TabsTrigger value="file" className="flex-1">
               <Upload className="mr-1.5 h-3.5 w-3.5" />
@@ -316,83 +424,115 @@ export function DocumentUploadDialog({
               </div>
             )}
 
-            {uploading && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {progress < 100 ? "업로드 중..." : "처리 중..."}
-                  </span>
-                  <span className="font-medium tabular-nums">{progress}%</span>
-                </div>
-                <Progress value={progress} className="h-2" />
-              </div>
-            )}
           </TabsContent>
 
           {/* === URL Tab === */}
-          <TabsContent value="url" className="mt-4 space-y-4">
+          <TabsContent
+            value="url"
+            className="mt-4 min-w-0 space-y-3 overflow-hidden"
+          >
             <p className="text-xs text-muted-foreground">
-              한 줄에 하나씩 URL을 입력하세요. 한 번에 최대 {MAX_URLS_PER_REQUEST}
-              개까지 등록 가능합니다.
+              URL 입력 후 <kbd className="rounded border px-1 text-[10px]">Enter</kbd>{" "}
+              <kbd className="rounded border px-1 text-[10px]">,</kbd>{" "}
+              <kbd className="rounded border px-1 text-[10px]">공백</kbd>으로 추가.
+              여러 URL은 한 번에 붙여넣기도 가능합니다 (최대{" "}
+              {MAX_URLS_PER_REQUEST}개).
             </p>
 
-            <Textarea
-              placeholder={"https://example.com/article\nhttps://example.com/docs"}
-              value={urlText}
-              onChange={(e) => setUrlText(e.target.value)}
-              rows={6}
-              disabled={submitting}
-              className="font-mono text-xs"
-            />
+            <div
+              onClick={() => urlInputRef.current?.focus()}
+              className={cn(
+                "flex min-h-[6rem] max-h-60 w-full max-w-full flex-wrap items-start gap-1.5 overflow-y-auto rounded-lg border border-input bg-transparent p-2 transition-colors",
+                "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+                submitting && "cursor-not-allowed bg-input/50 opacity-50"
+              )}
+            >
+              {chips.map((chip) => (
+                <span
+                  key={chip.id}
+                  title={chip.error ? `${chip.raw} — ${chip.error}` : chip.raw}
+                  className={cn(
+                    "inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 text-xs",
+                    chip.error
+                      ? "border-destructive/40 bg-destructive/10 text-destructive"
+                      : "border-primary/30 bg-primary/10 text-primary"
+                  )}
+                >
+                  {chip.error ? (
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <LinkIcon className="h-3 w-3 shrink-0" />
+                  )}
+                  <span className="max-w-[20rem] truncate">{chip.raw}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeChip(chip.id);
+                    }}
+                    disabled={submitting}
+                    className="shrink-0 rounded-sm hover:opacity-60 disabled:opacity-30"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={urlInputRef}
+                type="text"
+                value={currentInput}
+                onChange={(e) => setCurrentInput(e.target.value)}
+                onKeyDown={handleUrlInputKeyDown}
+                onPaste={handleUrlInputPaste}
+                onBlur={commitCurrentInput}
+                disabled={submitting}
+                placeholder={
+                  chips.length === 0
+                    ? "https://example.com/..."
+                    : ""
+                }
+                className="min-w-[10rem] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+              />
+            </div>
 
-            {parsedUrls.length > 0 && (
-              <div className="space-y-2">
-                <div className="max-h-44 space-y-1.5 overflow-y-auto">
-                  {parsedUrls.map((p, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-xs",
-                        p.error
-                          ? "border-destructive/50 bg-destructive/5"
-                          : "border-border"
-                      )}
-                    >
-                      {p.error ? (
-                        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                      ) : (
-                        <LinkIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate">{p.raw}</p>
-                        {p.error && (
-                          <p className="mt-0.5 text-destructive">{p.error}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex items-center justify-between px-1 text-xs">
-                  <span className="text-muted-foreground tabular-nums">
-                    유효 {validUrlCount}개
-                    {urlInvalidCount > 0 && (
-                      <span className="text-destructive">
-                        {" "}
-                        / 오류 {urlInvalidCount}개
-                      </span>
-                    )}
-                  </span>
-                  {urlOverflow && (
-                    <span className="font-medium text-destructive">
-                      한 번에 최대 {MAX_URLS_PER_REQUEST}개까지
+            {(chips.length > 0 || urlOverflow) && (
+              <div className="flex items-center justify-between px-1 text-xs">
+                <span className="text-muted-foreground tabular-nums">
+                  유효 {validUrlCount}개
+                  {urlInvalidCount > 0 && (
+                    <span className="text-destructive">
+                      {" "}
+                      / 오류 {urlInvalidCount}개
                     </span>
                   )}
-                </div>
+                </span>
+                {urlOverflow && (
+                  <span className="font-medium text-destructive">
+                    한 번에 최대 {MAX_URLS_PER_REQUEST}개까지
+                  </span>
+                )}
               </div>
             )}
           </TabsContent>
         </Tabs>
+
+        {(uploading || (submitting && progress === 100)) && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                {uploading
+                  ? progress < 100
+                    ? "파일 업로드 중..."
+                    : "파일 처리 중..."
+                  : "URL 등록 중..."}
+              </span>
+              {uploading && (
+                <span className="font-medium tabular-nums">{progress}%</span>
+              )}
+            </div>
+            {uploading && <Progress value={progress} className="h-2" />}
+          </div>
+        )}
 
         <DialogFooter>
           <Button
@@ -402,21 +542,17 @@ export function DocumentUploadDialog({
           >
             취소
           </Button>
-          {tab === "file" ? (
-            <Button
-              onClick={handleUpload}
-              disabled={validFileCount === 0 || uploading || exceedsTotal}
-            >
-              {uploading ? "업로드 중..." : `업로드 (${validFileCount}개)`}
-            </Button>
-          ) : (
-            <Button
-              onClick={handleUrlSubmit}
-              disabled={validUrlCount === 0 || submitting || urlOverflow}
-            >
-              {submitting ? "등록 중..." : `등록 (${validUrlCount}개)`}
-            </Button>
-          )}
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              (validFileCount === 0 && validUrlCount === 0) ||
+              busy ||
+              exceedsTotal ||
+              urlOverflow
+            }
+          >
+            {getSubmitLabel()}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -296,11 +296,14 @@ function ResultItem({
 
       <div className="min-w-0 flex-1 space-y-1">
         {/* Title */}
-        <div className="flex items-center gap-2 min-w-0">
-          <FileFormatIcon format={result.file_format} size="sm" />
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="shrink-0">
+            <FileFormatIcon format={result.file_format} size="sm" />
+          </div>
           <Link
             href={`/documents/${result.document_id}`}
-            className="truncate text-sm font-medium hover:text-primary hover:underline"
+            title={result.file_name}
+            className="block min-w-0 flex-1 truncate text-sm font-medium hover:text-primary hover:underline"
           >
             {highlightText(result.file_name, query)}
           </Link>
