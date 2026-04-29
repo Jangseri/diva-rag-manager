@@ -23,7 +23,7 @@ model Document {
   last_error_code String?  @db.VarChar(50)
   rgst_dt         DateTime @default(now()) @db.DateTime(0)
   rgst_nm         String   @db.VarChar(100)
-  status          String   @default("ACTIVE") @db.VarChar(10)
+  status          String   @default("ACTIVE") @db.VarChar(30)
   updt_dt         DateTime @updatedAt @db.DateTime(0)
   updt_nm         String   @db.VarChar(100)
 
