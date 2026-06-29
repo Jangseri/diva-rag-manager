@@ -18,6 +18,8 @@ import { validateFileFormat, validateFileSize } from "@/lib/validators/document"
 import { validateAndNormalizeUrl } from "@/lib/validators/url";
 import { formatFileSize } from "@/lib/format";
 import { uploadDocuments, submitUrls } from "@/lib/api-client";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { MAX_FILE_SIZE_MB } from "@/lib/constants";
 import { toast } from "sonner";
 
@@ -52,6 +54,10 @@ export function DocumentUploadDialog({
 }: UploadDialogProps) {
   const [tab, setTab] = useState<string>("file");
 
+  // Identity state
+  const [clientServiceId, setClientServiceId] = useState("");
+  const [tenantId, setTenantId] = useState("");
+
   // File tab state
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -66,6 +72,7 @@ export function DocumentUploadDialog({
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   const busy = uploading || submitting;
+  const identityValid = clientServiceId.trim() !== "" && tenantId.trim() !== "";
 
   const validateAndAddFiles = useCallback((newFiles: FileList | File[]) => {
     const validated: SelectedFile[] = Array.from(newFiles).map((file) => {
@@ -132,6 +139,13 @@ export function DocumentUploadDialog({
 
     if (validFilesList.length === 0 && validUrlList.length === 0) return;
 
+    if (!identityValid) {
+      toast.error("서비스 ID와 테넌트 ID를 입력해주세요");
+      return;
+    }
+
+    const identity = { clientServiceId: clientServiceId.trim(), tenantId: tenantId.trim() };
+
     let fileSuccess = 0;
     let fileFail = 0;
     let urlSuccess = 0;
@@ -143,7 +157,7 @@ export function DocumentUploadDialog({
       setUploading(true);
       setProgress(0);
       try {
-        const result = await uploadDocuments(validFilesList, setProgress);
+        const result = await uploadDocuments(validFilesList, identity, setProgress);
         setProgress(100);
         fileSuccess = result.data.length;
         fileFail = result.warnings?.length ?? 0;
@@ -166,7 +180,11 @@ export function DocumentUploadDialog({
     if (validUrlList.length > 0) {
       setSubmitting(true);
       try {
-        const result = await submitUrls({ urls: validUrlList });
+        const result = await submitUrls({
+          urls: validUrlList,
+          clientServiceId: identity.clientServiceId,
+          tenantId: identity.tenantId,
+        });
         urlSuccess = result.data.length;
         urlFail = result.warnings?.length ?? 0;
       } catch (error) {
@@ -270,6 +288,37 @@ export function DocumentUploadDialog({
     onSuccess();
   };
 
+  const identitySection = (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="clientServiceId" className="text-xs font-medium">
+          서비스 ID <span className="text-destructive">*</span>
+        </Label>
+        <Input
+          id="clientServiceId"
+          value={clientServiceId}
+          onChange={(e) => setClientServiceId(e.target.value)}
+          placeholder="예: 25"
+          disabled={busy}
+          className="h-8 text-sm"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="tenantId" className="text-xs font-medium">
+          테넌트 ID <span className="text-destructive">*</span>
+        </Label>
+        <Input
+          id="tenantId"
+          value={tenantId}
+          onChange={(e) => setTenantId(e.target.value)}
+          placeholder="예: dnis-001"
+          disabled={busy}
+          className="h-8 text-sm"
+        />
+      </div>
+    </div>
+  );
+
   const validFiles = files.filter((f) => !f.error);
   const validFileCount = validFiles.length;
   const totalSize = validFiles.reduce((sum, f) => sum + f.file.size, 0);
@@ -298,6 +347,8 @@ export function DocumentUploadDialog({
             파일을 업로드하거나 웹 URL을 등록하여 학습할 수 있습니다.
           </DialogDescription>
         </DialogHeader>
+
+        {identitySection}
 
         <Tabs
           value={tab}
@@ -548,7 +599,8 @@ export function DocumentUploadDialog({
               (validFileCount === 0 && validUrlCount === 0) ||
               busy ||
               exceedsTotal ||
-              urlOverflow
+              urlOverflow ||
+              !identityValid
             }
           >
             {getSubmitLabel()}

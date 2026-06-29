@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SearchQuerySchema } from "@/lib/validators/document";
 import { errorResponse, validationErrorResponse } from "@/lib/api-response";
 import { createLogger } from "@/lib/logger";
-import { getCurrentUser } from "@/lib/auth";
+import { extractIdentityFromBody } from "@/lib/identity";
 import {
   searchViaBroker,
   MilvusBrokerError,
@@ -16,20 +16,25 @@ const log = createLogger("api/search");
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const parsed = SearchQuerySchema.safeParse(body);
 
+    const identity = extractIdentityFromBody(body);
+    if (!identity) {
+      return validationErrorResponse("clientServiceId, tenantId가 필요합니다");
+    }
+
+    const parsed = SearchQuerySchema.safeParse(body);
     if (!parsed.success) {
       return validationErrorResponse("잘못된 검색 요청입니다");
     }
 
     const { query, method, top_k } = parsed.data;
-    const currentUser = getCurrentUser();
 
     const results = await searchViaBroker({
       query,
       method,
       top_k,
-      tenantId: currentUser.tenant_id,
+      tenantId: identity.tenantId,
+      clientServiceId: identity.clientServiceId,
     });
 
     const response: SearchResponse = {
@@ -42,7 +47,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (error) {
     if (error instanceof MilvusBrokerError) {
-      // 503: 서비스 일시적 불가 (연결 실패, 타임아웃, 응답 오류)
       const statusCode =
         error.code === "UNAVAILABLE" || error.code === "TIMEOUT"
           ? 503

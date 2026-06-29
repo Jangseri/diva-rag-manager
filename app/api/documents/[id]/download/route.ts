@@ -31,9 +31,13 @@ export async function GET(
     if (doc.source_type === "url" || !doc.file_format) {
       return errorResponse("URL 항목은 다운로드할 수 없습니다", 400);
     }
+    if (!doc.collection_name) {
+      return errorResponse("파일 경로 정보가 없습니다", 404);
+    }
 
     const ext = doc.file_format;
-    const exists = await fileExists(ORIGIN_PATH, doc.tenant_id, doc.file_id, ext);
+    const clientServiceId = doc.collection_name;
+    const exists = await fileExists(ORIGIN_PATH, clientServiceId, doc.tenant_id, doc.file_id, ext);
     if (!exists) {
       return errorResponse(
         "파일이 스토리지에 존재하지 않습니다. 관리자에게 문의해주세요.",
@@ -41,8 +45,8 @@ export async function GET(
       );
     }
 
-    const fileSize = await getFileSize(ORIGIN_PATH, doc.tenant_id, doc.file_id, ext);
-    const stream = createFileReadStream(ORIGIN_PATH, doc.tenant_id, doc.file_id, ext);
+    const fileSize = await getFileSize(ORIGIN_PATH, clientServiceId, doc.tenant_id, doc.file_id, ext);
+    const stream = createFileReadStream(ORIGIN_PATH, clientServiceId, doc.tenant_id, doc.file_id, ext);
     const mimeType =
       ALLOWED_MIME_TYPES[doc.file_format] || "application/octet-stream";
     const encodedFileName = encodeURIComponent(doc.file_name);

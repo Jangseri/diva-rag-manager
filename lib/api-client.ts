@@ -21,6 +21,11 @@ async function fetchApi<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface Identity {
+  clientServiceId: string;
+  tenantId: string;
+}
+
 export async function fetchDocuments(params: {
   page?: number;
   size?: number;
@@ -30,6 +35,8 @@ export async function fetchDocuments(params: {
   format?: string;
   status?: string;
   file_status?: string;
+  clientServiceId?: string;
+  tenantId?: string;
 }): Promise<DocumentListResponse> {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -48,9 +55,12 @@ export async function fetchDocument(
 
 export async function uploadDocuments(
   files: File[],
+  identity: Identity,
   onProgress?: (percent: number) => void
 ): Promise<{ data: DocumentResponse[]; warnings?: string[] }> {
   const formData = new FormData();
+  formData.append("clientServiceId", identity.clientServiceId);
+  formData.append("tenantId", identity.tenantId);
   files.forEach((file) => formData.append("files", file));
 
   return new Promise((resolve, reject) => {
@@ -86,7 +96,13 @@ export async function uploadDocuments(
 
 export async function submitUrls(payload: {
   urls: string[];
-  collection_name?: string | null;
+  clientServiceId: string;
+  tenantId: string;
+  crawler_options?: {
+    max_pages?: number;
+    max_depth?: number;
+    allow_external_links?: boolean;
+  };
 }): Promise<{ data: DocumentResponse[]; warnings?: string[] }> {
   return fetchApi("/api/documents/url", {
     method: "POST",
@@ -138,6 +154,8 @@ export async function searchDocuments(params: {
   query: string;
   method: SearchMethod;
   top_k?: number;
+  clientServiceId: string;
+  tenantId: string;
 }): Promise<SearchResponse> {
   return fetchApi("/api/search", {
     method: "POST",

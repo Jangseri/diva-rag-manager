@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileFormatIcon } from "@/components/documents/file-format-icon";
@@ -49,6 +50,8 @@ function highlightText(text: string, query: string): React.ReactNode {
 }
 
 export default function SearchPage() {
+  const [clientServiceId, setClientServiceId] = useState("");
+  const [tenantId, setTenantId] = useState("");
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [topK, setTopK] = useState(5);
@@ -62,6 +65,11 @@ export default function SearchPage() {
       return;
     }
 
+    if (!clientServiceId.trim() || !tenantId.trim()) {
+      toast.error("서비스 ID와 테넌트 ID를 입력해주세요");
+      return;
+    }
+
     const trimmed = query.trim();
     setIsSearching(true);
     setErrorMessage(null);
@@ -70,6 +78,8 @@ export default function SearchPage() {
         query: trimmed,
         method: "hybrid",
         top_k: topK,
+        clientServiceId: clientServiceId.trim(),
+        tenantId: tenantId.trim(),
       });
       setResults(hybrid);
       setSubmittedQuery(trimmed);
@@ -99,6 +109,36 @@ export default function SearchPage() {
           Hybrid 검색으로 문서에서 관련 내용을 찾아줍니다.
         </p>
       </div>
+
+      {/* Identity Input */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">
+                서비스 ID <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={clientServiceId}
+                onChange={(e) => setClientServiceId(e.target.value)}
+                placeholder="예: 25"
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">
+                테넌트 ID <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                placeholder="예: dnis-001"
+                className="h-8 text-sm"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Search Input */}
       <Card>
@@ -132,7 +172,7 @@ export default function SearchPage() {
 
               <Button
                 onClick={handleSearch}
-                disabled={!query.trim() || isSearching}
+                disabled={!query.trim() || isSearching || !clientServiceId.trim() || !tenantId.trim()}
                 className="gap-2"
               >
                 <Search className="h-4 w-4" />

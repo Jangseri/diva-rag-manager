@@ -16,7 +16,7 @@ interface CreateDocumentInput {
   file_format: string;
   file_size: bigint;
   origin_path: string;
-  collection_name?: string | null;
+  collection_name: string;
   rgst_nm: string;
 }
 
@@ -25,18 +25,24 @@ interface CreateUrlDocumentInput {
   file_name: string;
   tenant_id: string;
   source_url: string;
-  collection_name?: string | null;
+  collection_name: string;
   rgst_nm: string;
 }
 
 export async function listDocuments(
   query: DocumentListQuery
 ): Promise<ListResult> {
-  const { page, size, sort, order, search, format, status, file_status } = query;
+  const { page, size, sort, order, search, format, status, file_status, clientServiceId, tenantId } = query;
 
   const where: Record<string, unknown> = {};
   where.status = status || "ACTIVE";
 
+  if (clientServiceId) {
+    where.collection_name = clientServiceId;
+  }
+  if (tenantId) {
+    where.tenant_id = tenantId;
+  }
   if (file_status) {
     where.file_status = file_status;
   }
@@ -113,7 +119,7 @@ export async function createDocument(
       file_format: input.file_format,
       file_size: input.file_size,
       file_status: "UPLOADED",
-      collection_name: input.collection_name ?? null,
+      collection_name: input.collection_name,
       origin_path: input.origin_path,
       retry_count: 0,
       last_error_code: null,
@@ -138,7 +144,7 @@ export async function createUrlDocument(
       file_format: null,
       file_size: BigInt(0),
       file_status: "UPLOADED",
-      collection_name: input.collection_name ?? null,
+      collection_name: input.collection_name,
       origin_path: null,
       retry_count: 0,
       last_error_code: null,

@@ -14,9 +14,6 @@ export class MilvusBrokerError extends Error {
   }
 }
 
-const COLLECTION_NAME =
-  process.env.MILVUS_COLLECTION_NAME || "customized_setup_hybrid";
-
 // 스펙: HNSW + COSINE + ef=100 (KURE-v1 dense 인덱스 기준)
 const DEFAULT_INDEX_INFO = {
   index_type: "HNSW",
@@ -54,15 +51,15 @@ function getBaseUrl(): string {
   return url.replace(/\/+$/, "");
 }
 
-function getEndpoint(method: SearchMethod): string {
+function getEndpoint(method: SearchMethod, clientServiceId: string): string {
   const base = getBaseUrl();
   // Hybrid: dense + sparse(BGE-M3) + RRF
   // Vector (dense): dense만
   // BM25: 별도 엔드포인트 없음 → Hybrid 사용 (추후 지원 예정)
   if (method === "hybrid" || method === "bm25") {
-    return `${base}/v2/collections/hybrid/${COLLECTION_NAME}/partitions/search`;
+    return `${base}/v2/collections/hybrid/${clientServiceId}/partitions/search`;
   }
-  return `${base}/v2/collections/${COLLECTION_NAME}/partitions/search`;
+  return `${base}/v2/collections/${clientServiceId}/partitions/search`;
 }
 
 function getFileFormat(fileName: string): string {
@@ -111,9 +108,10 @@ export async function searchViaBroker(params: {
   method: SearchMethod;
   top_k: number;
   tenantId: string;
+  clientServiceId: string;
 }): Promise<SearchResult[]> {
-  const { query, method, top_k, tenantId } = params;
-  const url = getEndpoint(method);
+  const { query, method, top_k, tenantId, clientServiceId } = params;
+  const url = getEndpoint(method, clientServiceId);
 
   const body = {
     dnis: tenantId,
@@ -122,7 +120,7 @@ export async function searchViaBroker(params: {
     limit: top_k,
   };
 
-  log.info({ method, tenantId, top_k, collection: COLLECTION_NAME }, "milvus-broker 검색 요청");
+  log.info({ method, tenantId, clientServiceId, top_k }, "milvus-broker 검색 요청");
 
   let res: Response;
   try {

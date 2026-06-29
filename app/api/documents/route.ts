@@ -20,7 +20,7 @@ import {
   errorResponse,
   validationErrorResponse,
 } from "@/lib/api-response";
-import { getCurrentUser } from "@/lib/auth";
+import { extractIdentityFromFormData } from "@/lib/identity";
 import { createLogger } from "@/lib/logger";
 import { publishDocumentUploaded } from "@/lib/services/event-publisher";
 import path from "path";
@@ -61,8 +61,13 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse("요청 크기가 너무 큽니다");
     }
 
-    const currentUser = getCurrentUser();
     const formData = await request.formData();
+
+    const identity = extractIdentityFromFormData(formData);
+    if (!identity) {
+      return validationErrorResponse("clientServiceId, tenantId가 필요합니다");
+    }
+
     const files = formData.getAll("files") as File[];
 
     if (files.length === 0) {
@@ -93,7 +98,7 @@ export async function POST(request: NextRequest) {
 
     for (const { file, ext } of validFiles) {
       const duplicate = await findDuplicateDocument(
-        currentUser.tenant_id,
+        identity.tenantId,
         file.name
       );
       if (duplicate) {
@@ -110,10 +115,11 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // 경로: ORIGIN_PATH/{tenant_id}/{file_id}.{ext}
+      // 경로: ORIGIN_PATH/{clientServiceId}/{tenantId}/{file_id}.{ext}
       const savedPath = await saveFile(
         ORIGIN_PATH,
-        currentUser.tenant_id,
+        identity.clientServiceId,
+        identity.tenantId,
         file_id,
         ext,
         buffer
@@ -124,28 +130,27 @@ export async function POST(request: NextRequest) {
         const doc = await createDocument({
           file_id,
           file_name: file.name,
-          tenant_id: currentUser.tenant_id,
+          tenant_id: identity.tenantId,
           file_format: ext,
           file_size: BigInt(buffer.length),
           origin_path,
-          rgst_nm: currentUser.name,
+          collection_name: identity.clientServiceId,
+          rgst_nm: identity.tenantId,
         });
 
         created.push(toDocumentResponse(doc));
 
-        // Redis Stream 발행
         await publishDocumentUploaded({
           file_id,
-          tenant_id: currentUser.tenant_id,
-          collection_name: null,
+          tenant_id: identity.tenantId,
+          collection_name: identity.clientServiceId,
           file_name: file.name,
           file_type: ext,
           file_size: buffer.length,
           origin_path,
         });
       } catch (dbError) {
-        // DB 실패 시 저장된 파일 롤백
-        await deleteFile(ORIGIN_PATH, currentUser.tenant_id, file_id, ext).catch(() => {});
+        await deleteFile(ORIGIN_PATH, identity.clientServiceId, identity.tenantId, file_id, ext).catch(() => {});
         log.error(
           { err: dbError, fileName: file.name, file_id },
           "DB insert 실패, 파일 롤백 완료"
@@ -168,7 +173,8 @@ export async function POST(request: NextRequest) {
 
     log.info(
       {
-        userKey: currentUser.tenant_id,
+        clientServiceId: identity.clientServiceId,
+        tenantId: identity.tenantId,
         uploaded: created.length,
         failed: errors.length,
       },

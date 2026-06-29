@@ -189,7 +189,8 @@ describe("createDocument", () => {
       tenant_id: "user001",
       file_format: "pdf",
       file_size: BigInt(1024),
-      origin_path: "/data/diva/origin/user001/01FILE.pdf",
+      origin_path: "/data/diva/origin/25/user001/01FILE.pdf",
+      collection_name: "25",
       rgst_nm: "홍길동",
     });
 

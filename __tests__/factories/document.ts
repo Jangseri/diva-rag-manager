@@ -13,6 +13,7 @@ export function createDocumentRecord(
     overrides.file_name || `${faker.system.commonFileName(format)}`;
   const tenant_id = overrides.tenant_id || faker.string.alphanumeric(10);
   const file_id = overrides.file_id || generateId();
+  const collection_name = overrides.collection_name || faker.string.numeric(2);
 
   return {
     file_id,
@@ -23,8 +24,8 @@ export function createDocumentRecord(
     file_format: format,
     file_size: BigInt(faker.number.int({ min: 1024, max: 104857600 })),
     file_status: "UPLOADED",
-    collection_name: null,
-    origin_path: `/data/diva/origin/${tenant_id}/${file_id}.${format}`,
+    collection_name,
+    origin_path: `/data/diva/origin/${collection_name}/${tenant_id}/${file_id}.${format}`,
     retry_count: 0,
     last_error_code: null,
     rgst_dt: faker.date.recent(),

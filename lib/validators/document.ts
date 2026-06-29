@@ -33,6 +33,8 @@ export const DocumentListQuerySchema = z.object({
       "INDEX_FAILED",
     ])
     .optional(),
+  clientServiceId: z.string().optional(),
+  tenantId: z.string().optional(),
 });
 
 export type DocumentListQuery = z.infer<typeof DocumentListQuerySchema>;

@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { initiateDeletion } from "@/lib/services/deletion-gate";
 import { errorResponse, validationErrorResponse } from "@/lib/api-response";
-import { getCurrentUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
 import { publishDocumentDeleted } from "@/lib/services/event-publisher";
 import { deleteUrlTask } from "@/lib/services/extract-client";
@@ -22,7 +21,6 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse("한 번에 최대 100개까지 삭제할 수 있습니다");
     }
 
-    const currentUser = getCurrentUser();
     const success: string[] = [];
     const failed: { file_id: string; error: string }[] = [];
 
@@ -32,7 +30,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
       try {
-        const doc = await initiateDeletion(id, currentUser.name);
+        const doc = await initiateDeletion(id, "diva-rag-manager");
         success.push(id);
 
         if (doc.source_type === "url") {
@@ -44,7 +42,7 @@ export async function POST(request: NextRequest) {
         } else {
           await publishDocumentDeleted({
             file_id: id,
-            tenant_id: currentUser.tenant_id,
+            tenant_id: doc.tenant_id,
             collection_name: doc.collection_name,
           });
         }
@@ -57,15 +55,10 @@ export async function POST(request: NextRequest) {
     }
 
     log.info(
-      {
-        userKey: currentUser.tenant_id,
-        success: success.length,
-        failed: failed.length,
-      },
+      { success: success.length, failed: failed.length },
       "일괄 삭제 개시"
     );
 
-    // 202 Accepted: confirmation gate 통과 후 실제 삭제
     return NextResponse.json({ success, failed }, { status: 202 });
   } catch (error) {
     log.error({ err: error }, "일괄 삭제 실패");

@@ -16,7 +16,7 @@ import {
   errorResponse,
   validationErrorResponse,
 } from "@/lib/api-response";
-import { getCurrentUser } from "@/lib/auth";
+import { extractIdentityFromBody } from "@/lib/identity";
 import { createLogger } from "@/lib/logger";
 import { submitUrlTask, ExtractClientError } from "@/lib/services/extract-client";
 import { prisma } from "@/lib/prisma";
@@ -25,10 +25,14 @@ const log = createLogger("api/documents/url");
 
 export async function POST(request: NextRequest) {
   try {
-    const currentUser = getCurrentUser();
     const body = await request.json().catch(() => null);
     if (!body) {
       return validationErrorResponse("요청 본문이 올바르지 않습니다");
+    }
+
+    const identity = extractIdentityFromBody(body);
+    if (!identity) {
+      return validationErrorResponse("clientServiceId, tenantId가 필요합니다");
     }
 
     const parsed = UrlSubmitSchema.safeParse(body);
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { urls, collection_name, crawler_options } = parsed.data;
+    const { urls, crawler_options } = parsed.data;
 
     const created = [];
     const errors: string[] = [];
@@ -53,16 +57,14 @@ export async function POST(request: NextRequest) {
 
       const normalized = validation.normalized;
 
-      // 같은 요청 안에서 중복
       if (seenInBatch.has(normalized)) {
         errors.push(`${raw}: 같은 요청에 중복된 URL입니다`);
         continue;
       }
       seenInBatch.add(normalized);
 
-      // DB 중복 (tenant_id + source_url)
       const duplicate = await findDuplicateUrlDocument(
-        currentUser.tenant_id,
+        identity.tenantId,
         normalized
       );
       if (duplicate) {
@@ -78,10 +80,10 @@ export async function POST(request: NextRequest) {
         savedDoc = await createUrlDocument({
           file_id,
           file_name: validation.fileName,
-          tenant_id: currentUser.tenant_id,
+          tenant_id: identity.tenantId,
           source_url: normalized,
-          collection_name: collection_name ?? null,
-          rgst_nm: currentUser.name,
+          collection_name: identity.clientServiceId,
+          rgst_nm: identity.tenantId,
         });
       } catch (dbError) {
         log.error({ err: dbError, url: normalized }, "URL document insert 실패");
@@ -93,13 +95,12 @@ export async function POST(request: NextRequest) {
         await submitUrlTask({
           file_id,
           url: normalized,
-          tenant_id: currentUser.tenant_id,
-          collection_name: collection_name ?? null,
+          tenant_id: identity.tenantId,
+          collection_name: identity.clientServiceId,
           crawler_options,
         });
         created.push(toDocumentResponse(savedDoc));
       } catch (httpError) {
-        // extract-service 호출 실패 시 DB row 롤백
         await prisma.document
           .delete({ where: { file_id } })
           .catch((err) =>
@@ -134,7 +135,8 @@ export async function POST(request: NextRequest) {
 
     log.info(
       {
-        userKey: currentUser.tenant_id,
+        clientServiceId: identity.clientServiceId,
+        tenantId: identity.tenantId,
         registered: created.length,
         failed: errors.length,
       },

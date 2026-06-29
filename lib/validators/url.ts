@@ -8,7 +8,6 @@ export const UrlSubmitSchema = z.object({
     .array(z.string().min(1).max(MAX_URL_LENGTH))
     .min(1, "URL을 최소 1개 입력해주세요")
     .max(50, "한 번에 최대 50개까지 등록 가능합니다"),
-  collection_name: z.string().max(200).optional().nullable(),
   crawler_options: z
     .object({
       max_pages: z.number().int().min(1).max(500).optional(),
