@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       query,
       method,
       top_k,
-      user_key: currentUser.user_key,
+      tenantId: currentUser.user_key,
     });
 
     const response: SearchResponse = {

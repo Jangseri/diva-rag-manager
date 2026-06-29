@@ -55,11 +55,8 @@ export default function DocumentDetailPage({
         if (cancelled) return;
         setDocument(result.data);
 
-        // 미리보기 시도 (ACTIVE 상태이며 파일 케이스만)
-        if (
-          result.data.status === "ACTIVE" &&
-          result.data.source_type !== "url"
-        ) {
+        // 미리보기 시도 (ACTIVE 상태)
+        if (result.data.status === "ACTIVE") {
           setPreviewLoading(true);
           try {
             const p = await fetchPreview(id);
@@ -239,9 +236,8 @@ export default function DocumentDetailPage({
         </CardContent>
       </Card>
 
-      {/* Preview (파일 케이스만) */}
-      {!isUrl &&
-        document.status !== "DELETED" &&
+      {/* Preview */}
+      {document.status !== "DELETED" &&
         document.status !== "DELETING" && (
           <PreviewCard preview={preview} loading={previewLoading} />
         )}

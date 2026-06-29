@@ -17,10 +17,10 @@ export class MilvusBrokerError extends Error {
 const COLLECTION_NAME =
   process.env.MILVUS_COLLECTION_NAME || "customized_setup_hybrid";
 
-// 스펙: HNSW + L2 + ef=100 (권장 균형값)
+// 스펙: HNSW + COSINE + ef=100 (KURE-v1 dense 인덱스 기준)
 const DEFAULT_INDEX_INFO = {
   index_type: "HNSW",
-  metric_type: "L2",
+  metric_type: "COSINE",
   params: { ef: 100 },
 };
 
@@ -30,6 +30,7 @@ interface MilvusBrokerEntity {
   chunk_context?: string;
   category?: string;
   sub_category?: string;
+  url?: string;
 }
 
 interface MilvusBrokerHit {
@@ -40,8 +41,8 @@ interface MilvusBrokerHit {
 
 interface MilvusBrokerResponse {
   code: number;
-  error_code?: string | null;
-  error_message?: string | null;
+  errCode?: string | null;
+  errMessage?: string | null;
   body?: MilvusBrokerHit[] | null;
 }
 
@@ -59,9 +60,9 @@ function getEndpoint(method: SearchMethod): string {
   // Vector (dense): dense만
   // BM25: 별도 엔드포인트 없음 → Hybrid 사용 (추후 지원 예정)
   if (method === "hybrid" || method === "bm25") {
-    return `${base}/v2/collections/hybrid/workcenter/${COLLECTION_NAME}/partitions/search`;
+    return `${base}/v2/collections/hybrid/${COLLECTION_NAME}/partitions/search`;
   }
-  return `${base}/v2/collections/workcenter/${COLLECTION_NAME}/partitions/search`;
+  return `${base}/v2/collections/${COLLECTION_NAME}/partitions/search`;
 }
 
 function getFileFormat(fileName: string): string {
@@ -109,19 +110,19 @@ export async function searchViaBroker(params: {
   query: string;
   method: SearchMethod;
   top_k: number;
-  user_key: string;
+  tenantId: string;
 }): Promise<SearchResult[]> {
-  const { query, method, top_k, user_key } = params;
+  const { query, method, top_k, tenantId } = params;
   const url = getEndpoint(method);
 
   const body = {
-    dnis: user_key,
+    dnis: tenantId,
     message: query,
     indexInfo: DEFAULT_INDEX_INFO,
     limit: top_k,
   };
 
-  log.info({ method, userKey: user_key, top_k, collection: COLLECTION_NAME }, "milvus-broker 검색 요청");
+  log.info({ method, tenantId, top_k, collection: COLLECTION_NAME }, "milvus-broker 검색 요청");
 
   let res: Response;
   try {
@@ -176,11 +177,11 @@ export async function searchViaBroker(params: {
   // 스펙: HTTP 200이어도 code != 2000이면 실패
   if (data.code !== 2000) {
     log.error(
-      { code: data.code, errCode: data.error_code, errMsg: data.error_message },
+      { code: data.code, errCode: data.errCode, errMsg: data.errMessage },
       "milvus-broker 에러 응답"
     );
     throw new MilvusBrokerError(
-      data.error_message || "검색 처리 중 오류가 발생했습니다.",
+      data.errMessage || "검색 처리 중 오류가 발생했습니다.",
       "BAD_RESPONSE"
     );
   }
