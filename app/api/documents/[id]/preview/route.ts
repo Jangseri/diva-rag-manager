@@ -27,15 +27,15 @@ function statusGuard(file_status: string): PreviewSection | null {
   return { previewable: false, reason: "추출이 완료된 후 확인할 수 있습니다" };
 }
 
-function getExtractPath(user_key: string, file_name: string): string {
-  return path.resolve(EXTRACT_PATH, user_key, `${file_name}.json`);
+function getExtractPath(tenant_id: string, file_name: string): string {
+  return path.resolve(EXTRACT_PATH, tenant_id, `${file_name}.json`);
 }
 
 /**
  * 추출 텍스트 탭: extracted_text 필드만 표시
  */
 async function getExtractedText(
-  user_key: string,
+  tenant_id: string,
   file_name: string,
   file_status: string
 ): Promise<PreviewSection> {
@@ -43,7 +43,7 @@ async function getExtractedText(
   if (guard) return guard;
 
   try {
-    const raw = await fs.readFile(getExtractPath(user_key, file_name), "utf-8");
+    const raw = await fs.readFile(getExtractPath(tenant_id, file_name), "utf-8");
     const json = JSON.parse(raw);
     const text = json.extracted_text;
 
@@ -66,7 +66,7 @@ async function getExtractedText(
  * 원본 탭: 전체 JSON 표시
  */
 async function getOriginalJson(
-  user_key: string,
+  tenant_id: string,
   file_name: string,
   file_status: string
 ): Promise<PreviewSection> {
@@ -74,7 +74,7 @@ async function getOriginalJson(
   if (guard) return guard;
 
   try {
-    const raw = await fs.readFile(getExtractPath(user_key, file_name), "utf-8");
+    const raw = await fs.readFile(getExtractPath(tenant_id, file_name), "utf-8");
     const formatted = JSON.stringify(JSON.parse(raw), null, 2);
     const truncated = formatted.length > MAX_PREVIEW_BYTES;
 
@@ -104,8 +104,8 @@ export async function GET(
     }
 
     const [extracted, original] = await Promise.all([
-      getExtractedText(doc.user_key, doc.file_name, doc.file_status),
-      getOriginalJson(doc.user_key, doc.file_name, doc.file_status),
+      getExtractedText(doc.tenant_id, doc.file_name, doc.file_status),
+      getOriginalJson(doc.tenant_id, doc.file_name, doc.file_status),
     ]);
 
     return NextResponse.json({

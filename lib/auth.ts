@@ -2,14 +2,14 @@
 // 현재는 임시 기본값을 반환
 
 export interface CurrentUser {
-  user_key: string;
+  tenant_id: string;
   name: string;
 }
 
 export function getCurrentUser(): CurrentUser {
   // TODO: 세션/토큰에서 실제 사용자 정보 조회
   return {
-    user_key: "user01",
+    tenant_id: "user01",
     name: "admin",
   };
 }

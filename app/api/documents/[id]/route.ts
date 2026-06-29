@@ -42,7 +42,7 @@ export async function DELETE(
     // 삭제 프로세스 개시 (status=DELETING, confirmation row 생성)
     const doc = (await initiateDeletion(id, currentUser.name)) as DocumentRecord;
     log.info(
-      { file_id: id, userKey: currentUser.user_key, source_type: doc.source_type },
+      { file_id: id, userKey: currentUser.tenant_id, source_type: doc.source_type },
       "삭제 프로세스 개시"
     );
 
@@ -58,7 +58,7 @@ export async function DELETE(
       // FILE 케이스: DOCUMENT_DELETED 발행 → extract, milvus가 각자 처리
       await publishDocumentDeleted({
         file_id: id,
-        user_key: currentUser.user_key,
+        tenant_id: currentUser.tenant_id,
         collection_name: doc.collection_name,
       });
     }

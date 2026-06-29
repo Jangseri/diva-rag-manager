@@ -165,15 +165,15 @@ describe("getDocument", () => {
 });
 
 describe("findDuplicateDocument", () => {
-  it("should find ACTIVE duplicate by user_key + file_name", async () => {
-    const record = createDocumentRecord({ user_key: "u1", file_name: "a.pdf" });
+  it("should find ACTIVE duplicate by tenant_id + file_name", async () => {
+    const record = createDocumentRecord({ tenant_id: "u1", file_name: "a.pdf" });
     prismaMock.document.findFirst.mockResolvedValue(record);
 
     const result = await findDuplicateDocument("u1", "a.pdf");
 
     expect(result).toBeDefined();
     expect(prismaMock.document.findFirst).toHaveBeenCalledWith({
-      where: { user_key: "u1", file_name: "a.pdf", status: "ACTIVE" },
+      where: { tenant_id: "u1", file_name: "a.pdf", status: "ACTIVE" },
     });
   });
 });
@@ -186,7 +186,7 @@ describe("createDocument", () => {
     const result = await createDocument({
       file_id: "01FILE",
       file_name: "test.pdf",
-      user_key: "user001",
+      tenant_id: "user001",
       file_format: "pdf",
       file_size: BigInt(1024),
       origin_path: "/data/diva/origin/user001/01FILE.pdf",
@@ -198,7 +198,7 @@ describe("createDocument", () => {
       data: expect.objectContaining({
         file_id: "01FILE",
         file_name: "test.pdf",
-        user_key: "user001",
+        tenant_id: "user001",
         file_format: "pdf",
         file_size: BigInt(1024),
         origin_path: "/data/diva/origin/user001/01FILE.pdf",

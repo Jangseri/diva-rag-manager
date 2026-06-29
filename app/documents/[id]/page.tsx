@@ -208,7 +208,7 @@ export default function DocumentDetailPage({
             <MetadataItem
               icon={User}
               label="등록자"
-              value={document.user_key}
+              value={document.tenant_id}
             />
             <MetadataItem
               icon={FileType}

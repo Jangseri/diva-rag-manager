@@ -126,11 +126,11 @@ export function getColumns(actions: ColumnActions): ColumnDef<DocumentResponse>[
       ),
     },
     {
-      accessorKey: "user_key",
+      accessorKey: "tenant_id",
       header: () => <div className="text-center">등록자</div>,
       cell: ({ row }) => (
         <div className="text-center text-sm text-muted-foreground">
-          {row.original.user_key}
+          {row.original.tenant_id}
         </div>
       ),
     },

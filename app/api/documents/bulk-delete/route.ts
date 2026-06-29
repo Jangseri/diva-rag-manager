@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
         } else {
           await publishDocumentDeleted({
             file_id: id,
-            user_key: currentUser.user_key,
+            tenant_id: currentUser.tenant_id,
             collection_name: doc.collection_name,
           });
         }
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     log.info(
       {
-        userKey: currentUser.user_key,
+        userKey: currentUser.tenant_id,
         success: success.length,
         failed: failed.length,
       },

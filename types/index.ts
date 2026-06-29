@@ -43,7 +43,7 @@ export interface DocumentRecord {
   source_type: string;
   source_url: string | null;
   file_name: string;
-  user_key: string;
+  tenant_id: string;
   file_format: string | null;
   file_size: bigint;
   file_status: string;
@@ -70,7 +70,7 @@ export interface DocumentResponse {
   source_type: string;
   source_url: string | null;
   file_name: string;
-  user_key: string;
+  tenant_id: string;
   file_format: string | null;
   file_size: string;
   file_status: string;

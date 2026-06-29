@@ -14,7 +14,7 @@ export interface CrawlerOptions {
 export interface UrlTaskRequest {
   file_id: string;
   url: string;
-  user_key: string;
+  tenant_id: string;
   collection_name?: string | null;
   crawler_options?: CrawlerOptions;
 }
@@ -26,7 +26,7 @@ export interface UrlTaskResponse {
   source_type: "url";
   file_name: string;
   url: string;
-  user_key: string;
+  tenant_id: string;
   collection_name: string | null;
 }
 
@@ -93,7 +93,7 @@ export async function submitUrlTask(
   payload: UrlTaskRequest
 ): Promise<UrlTaskResponse> {
   log.info(
-    { file_id: payload.file_id, url: payload.url, user_key: payload.user_key },
+    { file_id: payload.file_id, url: payload.url, tenant_id: payload.tenant_id },
     "URL 추출 작업 등록 요청"
   );
   return request<UrlTaskResponse>("POST", "/v1/extract/tasks/url", payload);

@@ -37,7 +37,7 @@ interface BaseEvent {
   schema_version: string;
   timestamp: string;
   file_id: string;
-  user_key?: string;
+  tenant_id?: string;
   error_code?: string;
   error_message?: string;
   retryable?: boolean;
@@ -158,7 +158,7 @@ async function handleExtractFailed(event: BaseEvent) {
     if (doc.origin_path && doc.file_format) {
       await publishDocumentUploaded({
         file_id: doc.file_id,
-        user_key: doc.user_key,
+        tenant_id: doc.tenant_id,
         collection_name: doc.collection_name,
         file_name: doc.file_name,
         file_type: doc.file_format,
@@ -233,7 +233,7 @@ async function handleIndexFailed(event: BaseEvent) {
     if (doc.origin_path && doc.file_format) {
       await publishDocumentUploaded({
         file_id: doc.file_id,
-        user_key: doc.user_key,
+        tenant_id: doc.tenant_id,
         collection_name: doc.collection_name,
         file_name: doc.file_name,
         file_type: doc.file_format,

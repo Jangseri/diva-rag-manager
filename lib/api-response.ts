@@ -7,7 +7,7 @@ export function toDocumentResponse(doc: DocumentRecord): DocumentResponse {
     source_type: doc.source_type,
     source_url: doc.source_url,
     file_name: doc.file_name,
-    user_key: doc.user_key,
+    tenant_id: doc.tenant_id,
     file_format: doc.file_format,
     file_size: doc.file_size.toString(),
     file_status: doc.file_status,

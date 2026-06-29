@@ -5,9 +5,9 @@ import type { ReadStream } from "fs";
 
 /**
  * 파일 저장 경로 규칙:
- *   {basePath}/{user_key}/{file_id}.{ext}
+ *   {basePath}/{tenant_id}/{file_id}.{ext}
  *
- * user_key, file_id, ext 모두 path traversal 방지를 위해 sanitize.
+ * tenant_id, file_id, ext 모두 path traversal 방지를 위해 sanitize.
  */
 
 function sanitize(segment: string, label: string): string {
@@ -30,8 +30,8 @@ function buildFileName(file_id: string, ext: string): string {
   return `${safeId}.${safeExt}`;
 }
 
-function safePath(basePath: string, user_key: string, file_id: string, ext: string): string {
-  const safeUserKey = sanitize(user_key, "user_key");
+function safePath(basePath: string, tenant_id: string, file_id: string, ext: string): string {
+  const safeUserKey = sanitize(tenant_id, "tenant_id");
   const fileName = buildFileName(file_id, ext);
   const fullPath = path.resolve(basePath, safeUserKey, fileName);
   const resolvedBase = path.resolve(basePath);
@@ -44,21 +44,21 @@ function safePath(basePath: string, user_key: string, file_id: string, ext: stri
 
 export function getFilePath(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): string {
-  return safePath(basePath, user_key, file_id, ext);
+  return safePath(basePath, tenant_id, file_id, ext);
 }
 
 export async function saveFile(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string,
   buffer: Buffer
 ): Promise<string> {
-  const filePath = safePath(basePath, user_key, file_id, ext);
+  const filePath = safePath(basePath, tenant_id, file_id, ext);
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(filePath, buffer);
@@ -67,43 +67,43 @@ export async function saveFile(
 
 export async function readFile(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): Promise<Buffer> {
-  const filePath = safePath(basePath, user_key, file_id, ext);
+  const filePath = safePath(basePath, tenant_id, file_id, ext);
   return fs.readFile(filePath);
 }
 
 export function createFileReadStream(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): ReadStream {
-  const filePath = safePath(basePath, user_key, file_id, ext);
+  const filePath = safePath(basePath, tenant_id, file_id, ext);
   return createReadStream(filePath);
 }
 
 export async function getFileSize(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): Promise<number> {
-  const filePath = safePath(basePath, user_key, file_id, ext);
+  const filePath = safePath(basePath, tenant_id, file_id, ext);
   const stat = await fs.stat(filePath);
   return stat.size;
 }
 
 export async function fileExists(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): Promise<boolean> {
   try {
-    const filePath = safePath(basePath, user_key, file_id, ext);
+    const filePath = safePath(basePath, tenant_id, file_id, ext);
     await fs.access(filePath);
     return true;
   } catch {
@@ -116,10 +116,10 @@ export async function fileExists(
  */
 export async function deleteFile(
   basePath: string,
-  user_key: string,
+  tenant_id: string,
   file_id: string,
   ext: string
 ): Promise<void> {
-  const filePath = safePath(basePath, user_key, file_id, ext);
+  const filePath = safePath(basePath, tenant_id, file_id, ext);
   await fs.rm(filePath, { force: true });
 }

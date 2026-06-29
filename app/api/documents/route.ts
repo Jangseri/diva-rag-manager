@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     for (const { file, ext } of validFiles) {
       const duplicate = await findDuplicateDocument(
-        currentUser.user_key,
+        currentUser.tenant_id,
         file.name
       );
       if (duplicate) {
@@ -110,10 +110,10 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // 경로: ORIGIN_PATH/{user_key}/{file_id}.{ext}
+      // 경로: ORIGIN_PATH/{tenant_id}/{file_id}.{ext}
       const savedPath = await saveFile(
         ORIGIN_PATH,
-        currentUser.user_key,
+        currentUser.tenant_id,
         file_id,
         ext,
         buffer
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
         const doc = await createDocument({
           file_id,
           file_name: file.name,
-          user_key: currentUser.user_key,
+          tenant_id: currentUser.tenant_id,
           file_format: ext,
           file_size: BigInt(buffer.length),
           origin_path,
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
         // Redis Stream 발행
         await publishDocumentUploaded({
           file_id,
-          user_key: currentUser.user_key,
+          tenant_id: currentUser.tenant_id,
           collection_name: null,
           file_name: file.name,
           file_type: ext,
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (dbError) {
         // DB 실패 시 저장된 파일 롤백
-        await deleteFile(ORIGIN_PATH, currentUser.user_key, file_id, ext).catch(() => {});
+        await deleteFile(ORIGIN_PATH, currentUser.tenant_id, file_id, ext).catch(() => {});
         log.error(
           { err: dbError, fileName: file.name, file_id },
           "DB insert 실패, 파일 롤백 완료"
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
 
     log.info(
       {
-        userKey: currentUser.user_key,
+        userKey: currentUser.tenant_id,
         uploaded: created.length,
         failed: errors.length,
       },

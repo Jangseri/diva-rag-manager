@@ -12,7 +12,7 @@ interface ListResult {
 interface CreateDocumentInput {
   file_id: string;
   file_name: string;
-  user_key: string;
+  tenant_id: string;
   file_format: string;
   file_size: bigint;
   origin_path: string;
@@ -23,7 +23,7 @@ interface CreateDocumentInput {
 interface CreateUrlDocumentInput {
   file_id: string;
   file_name: string;
-  user_key: string;
+  tenant_id: string;
   source_url: string;
   collection_name?: string | null;
   rgst_nm: string;
@@ -77,7 +77,7 @@ export async function findDuplicateDocument(
 ): Promise<DocumentRecord | null> {
   const doc = await prisma.document.findFirst({
     where: {
-      user_key: userKey,
+      tenant_id: userKey,
       file_name: fileName,
       status: "ACTIVE",
     },
@@ -91,7 +91,7 @@ export async function findDuplicateUrlDocument(
 ): Promise<DocumentRecord | null> {
   const doc = await prisma.document.findFirst({
     where: {
-      user_key: userKey,
+      tenant_id: userKey,
       source_url: sourceUrl,
       source_type: "url",
       status: "ACTIVE",
@@ -109,7 +109,7 @@ export async function createDocument(
       source_type: "file",
       source_url: null,
       file_name: input.file_name,
-      user_key: input.user_key,
+      tenant_id: input.tenant_id,
       file_format: input.file_format,
       file_size: input.file_size,
       file_status: "UPLOADED",
@@ -134,7 +134,7 @@ export async function createUrlDocument(
       source_type: "url",
       source_url: input.source_url,
       file_name: input.file_name,
-      user_key: input.user_key,
+      tenant_id: input.tenant_id,
       file_format: null,
       file_size: BigInt(0),
       file_status: "UPLOADED",

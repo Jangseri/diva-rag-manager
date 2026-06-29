@@ -60,9 +60,9 @@ export async function POST(request: NextRequest) {
       }
       seenInBatch.add(normalized);
 
-      // DB 중복 (user_key + source_url)
+      // DB 중복 (tenant_id + source_url)
       const duplicate = await findDuplicateUrlDocument(
-        currentUser.user_key,
+        currentUser.tenant_id,
         normalized
       );
       if (duplicate) {
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         savedDoc = await createUrlDocument({
           file_id,
           file_name: validation.fileName,
-          user_key: currentUser.user_key,
+          tenant_id: currentUser.tenant_id,
           source_url: normalized,
           collection_name: collection_name ?? null,
           rgst_nm: currentUser.name,
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
         await submitUrlTask({
           file_id,
           url: normalized,
-          user_key: currentUser.user_key,
+          tenant_id: currentUser.tenant_id,
           collection_name: collection_name ?? null,
           crawler_options,
         });
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
 
     log.info(
       {
-        userKey: currentUser.user_key,
+        userKey: currentUser.tenant_id,
         registered: created.length,
         failed: errors.length,
       },

@@ -22,7 +22,7 @@ interface CommonFields {
 export interface DocumentUploadedEvent extends CommonFields {
   event_type: "DOCUMENT_UPLOADED";
   file_id: string;
-  user_key: string;
+  tenant_id: string;
   collection_name: string | null;
   file_name: string;
   file_type: string;
@@ -33,7 +33,7 @@ export interface DocumentUploadedEvent extends CommonFields {
 export interface DocumentDeletedEvent extends CommonFields {
   event_type: "DOCUMENT_DELETED";
   file_id: string;
-  user_key: string;
+  tenant_id: string;
   collection_name: string | null;
 }
 

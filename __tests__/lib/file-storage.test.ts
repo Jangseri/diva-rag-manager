@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("getFilePath", () => {
-  it("should construct correct file path: {base}/{user_key}/{file_id}.{ext}", () => {
+  it("should construct correct file path: {base}/{tenant_id}/{file_id}.{ext}", () => {
     const result = getFilePath(tempDir, "user01", "01FILE", "pdf");
     expect(result).toBe(path.resolve(tempDir, "user01", "01FILE.pdf"));
   });
@@ -48,7 +48,7 @@ describe("saveFile / readFile", () => {
     expect(read.toString()).toBe("hello world");
   });
 
-  it("should create user_key directory if not exists", async () => {
+  it("should create tenant_id directory if not exists", async () => {
     const buffer = Buffer.from("x");
     await saveFile(tempDir, "newuser", "01X", "txt", buffer);
     const dir = path.join(tempDir, "newuser");
@@ -98,7 +98,7 @@ describe("deleteFile", () => {
 });
 
 describe("path traversal protection", () => {
-  it("should reject path traversal in user_key", () => {
+  it("should reject path traversal in tenant_id", () => {
     expect(() => getFilePath(tempDir, "../../etc", "id", "txt")).toThrow();
   });
 
@@ -106,11 +106,11 @@ describe("path traversal protection", () => {
     expect(() => getFilePath(tempDir, "u", "../../escape", "txt")).toThrow();
   });
 
-  it("should reject invalid chars in user_key", () => {
+  it("should reject invalid chars in tenant_id", () => {
     expect(() => getFilePath(tempDir, "u/../a", "id", "txt")).toThrow();
   });
 
-  it("should reject empty user_key", () => {
+  it("should reject empty tenant_id", () => {
     expect(() => getFilePath(tempDir, "", "id", "txt")).toThrow();
   });
 

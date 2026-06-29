@@ -11,7 +11,7 @@ export function createDocumentRecord(
     faker.helpers.arrayElement([...ALLOWED_FILE_FORMATS]);
   const fileName =
     overrides.file_name || `${faker.system.commonFileName(format)}`;
-  const user_key = overrides.user_key || faker.string.alphanumeric(10);
+  const tenant_id = overrides.tenant_id || faker.string.alphanumeric(10);
   const file_id = overrides.file_id || generateId();
 
   return {
@@ -19,12 +19,12 @@ export function createDocumentRecord(
     source_type: "file",
     source_url: null,
     file_name: fileName,
-    user_key,
+    tenant_id,
     file_format: format,
     file_size: BigInt(faker.number.int({ min: 1024, max: 104857600 })),
     file_status: "UPLOADED",
     collection_name: null,
-    origin_path: `/data/diva/origin/${user_key}/${file_id}.${format}`,
+    origin_path: `/data/diva/origin/${tenant_id}/${file_id}.${format}`,
     retry_count: 0,
     last_error_code: null,
     rgst_dt: faker.date.recent(),
@@ -42,7 +42,7 @@ export function toDocumentResponse(record: DocumentRecord): DocumentResponse {
     source_type: record.source_type,
     source_url: record.source_url,
     file_name: record.file_name,
-    user_key: record.user_key,
+    tenant_id: record.tenant_id,
     file_format: record.file_format,
     file_size: record.file_size.toString(),
     file_status: record.file_status,
