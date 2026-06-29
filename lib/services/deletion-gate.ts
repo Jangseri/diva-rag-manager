@@ -200,6 +200,16 @@ export async function finalizeTimeout(file_id: string) {
   });
   if (!conf || conf.finalized_at) return;
 
+  const doc = await prisma.document.findUnique({ where: { file_id } });
+  if (!doc) {
+    await prisma.deletionConfirmation.update({
+      where: { file_id },
+      data: { finalized_at: new Date() },
+    });
+    log.warn({ file_id }, "삭제 타임아웃 — document 없음, confirmation 정리");
+    return;
+  }
+
   await prisma.$transaction([
     prisma.document.update({
       where: { file_id },
