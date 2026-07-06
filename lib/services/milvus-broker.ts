@@ -14,11 +14,20 @@ export class MilvusBrokerError extends Error {
   }
 }
 
-// 스펙: HNSW + COSINE + ef=100 (KURE-v1 dense 인덱스 기준)
-const DEFAULT_INDEX_INFO = {
+// 스펙: HNSW (KURE-v1 dense / BGE-M3 sparse 인덱스 기준, 192.168.220.223:8009 검증 완료)
+const DENSE_INDEX_INFO = {
   index_type: "HNSW",
   metric_type: "COSINE",
-  params: { ef: 100 },
+  params: {},
+};
+const SPARSE_INDEX_INFO = {
+  index_type: "HNSW",
+  metric_type: "IP",
+  params: {},
+};
+const DEFAULT_RANKER = {
+  type: "weighted",
+  weights: { dense: 0.3, sparse: 0.7 },
 };
 
 interface MilvusBrokerEntity {
@@ -53,13 +62,32 @@ function getBaseUrl(): string {
 
 function getEndpoint(method: SearchMethod, clientServiceId: string): string {
   const base = getBaseUrl();
-  // Hybrid: dense + sparse(BGE-M3) + RRF
-  // Vector (dense): dense만
-  // BM25: 별도 엔드포인트 없음 → Hybrid 사용 (추후 지원 예정)
-  if (method === "hybrid" || method === "bm25") {
+  // Hybrid: dense + sparse(BGE-M3) + weighted ranker (workcenter 세그먼트 없음)
+  // BM25: sparse 전용 엔드포인트
+  // Vector: dense 전용 엔드포인트
+  if (method === "hybrid") {
     return `${base}/v2/collections/hybrid/${clientServiceId}/partitions/search`;
   }
-  return `${base}/v2/collections/${clientServiceId}/partitions/search`;
+  if (method === "bm25") {
+    return `${base}/v2/collections/sparse/workcenter/${clientServiceId}/partitions/search`;
+  }
+  return `${base}/v2/collections/workcenter/${clientServiceId}/partitions/search`;
+}
+
+function buildRequestBody(
+  method: SearchMethod,
+  params: { query: string; top_k: number; tenantId: string }
+) {
+  const { query, top_k, tenantId } = params;
+  const base = { tenant_id: tenantId, message: query, limit: top_k };
+
+  if (method === "bm25") {
+    return { ...base, index_info: SPARSE_INDEX_INFO };
+  }
+  if (method === "hybrid") {
+    return { ...base, index_info: DENSE_INDEX_INFO, ranker: DEFAULT_RANKER };
+  }
+  return { ...base, index_info: DENSE_INDEX_INFO };
 }
 
 function getFileFormat(fileName: string): string {
@@ -112,13 +140,7 @@ export async function searchViaBroker(params: {
 }): Promise<SearchResult[]> {
   const { query, method, top_k, tenantId, clientServiceId } = params;
   const url = getEndpoint(method, clientServiceId);
-
-  const body = {
-    dnis: tenantId,
-    message: query,
-    indexInfo: DEFAULT_INDEX_INFO,
-    limit: top_k,
-  };
+  const body = buildRequestBody(method, { query, top_k, tenantId });
 
   log.info({ method, tenantId, clientServiceId, top_k }, "milvus-broker 검색 요청");
 
