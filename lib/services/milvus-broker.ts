@@ -96,8 +96,8 @@ function getFileFormat(fileName: string): string {
 }
 
 /**
- * RRF 점수는 "높을수록 관련도 높음". 결과 내 max 값으로 0~1 정규화.
- * (RRF 점수는 1/(k+rank) 합이라 절대값이 작음 → UI 표시용으로 상대 스케일 사용)
+ * BM25(IP)/Hybrid(weighted 융합) 점수는 척도가 절대적이지 않음(무계 내적, 이종 척도 혼합).
+ * 결과 내 max 값으로 0~1 상대 정규화 — "이번 검색 결과 안에서의 순위감"용, 절대 신뢰도 아님.
  */
 function normalizeScores(hits: MilvusBrokerHit[]): number[] {
   if (hits.length === 0) return [];
@@ -105,6 +105,17 @@ function normalizeScores(hits: MilvusBrokerHit[]): number[] {
   const max = Math.max(...distances);
   if (max <= 0) return distances.map(() => 0);
   return distances.map((d) => Number((d / max).toFixed(4)));
+}
+
+/**
+ * Vector(Dense, COSINE) 점수는 코사인 유사도 자체가 -1~1의 절대 척도이므로
+ * 배치 내 정규화 없이 원본 값을 그대로 사용(0~1로 clamp만 적용).
+ */
+function absoluteScores(hits: MilvusBrokerHit[]): number[] {
+  return hits.map((h) => {
+    const d = typeof h.distance === "number" ? h.distance : 0;
+    return Number(Math.min(1, Math.max(0, d)).toFixed(4));
+  });
 }
 
 function buildSnippet(entity: MilvusBrokerEntity): string {
@@ -209,6 +220,6 @@ export async function searchViaBroker(params: {
   const hits = data.body || [];
   log.info({ count: hits.length }, "milvus-broker 검색 결과");
 
-  const normalized = normalizeScores(hits);
-  return hits.map((hit, idx) => toSearchResult(hit, normalized[idx]));
+  const scores = method === "vector" ? absoluteScores(hits) : normalizeScores(hits);
+  return hits.map((hit, idx) => toSearchResult(hit, scores[idx]));
 }

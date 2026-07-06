@@ -237,6 +237,7 @@ export default function SearchPage() {
               icon={<FileText className="h-4 w-4" />}
               response={results.bm25}
               color="blue"
+              highlight
               query={submittedQuery}
             />
             <ResultColumn
@@ -245,6 +246,7 @@ export default function SearchPage() {
               icon={<Sparkles className="h-4 w-4" />}
               response={results.vector}
               color="purple"
+              showScore
               query={submittedQuery}
             />
           </div>
@@ -318,6 +320,8 @@ function ResultColumn({
   response,
   color,
   isFinal = false,
+  showScore = false,
+  highlight = false,
   query,
 }: {
   title: string;
@@ -326,6 +330,8 @@ function ResultColumn({
   response: SearchResponse | null;
   color: "blue" | "purple" | "emerald";
   isFinal?: boolean;
+  showScore?: boolean;
+  highlight?: boolean;
   query: string;
 }) {
   const colors = colorMap[color];
@@ -364,6 +370,8 @@ function ResultColumn({
                 result={result}
                 rank={index + 1}
                 barColor={colors.bar}
+                showScore={showScore}
+                highlight={highlight}
                 query={query}
               />
             ))}
@@ -378,14 +386,19 @@ function ResultItem({
   result,
   rank,
   barColor,
+  showScore,
+  highlight,
   query,
 }: {
   result: SearchResult;
   rank: number;
-  barColor: string;
+  barColor?: string;
+  showScore: boolean;
+  highlight: boolean;
   query: string;
 }) {
   const scorePercent = Math.round(result.score * 100);
+  const renderText = (text: string) => (highlight ? highlightText(text, query) : text);
 
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50">
@@ -395,7 +408,7 @@ function ResultItem({
       </div>
 
       <div className="min-w-0 flex-1 space-y-1">
-        {/* Title + Score */}
+        {/* Title + Score(Vector만) */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <div className="shrink-0">
@@ -406,27 +419,29 @@ function ResultItem({
               title={result.file_name}
               className="block min-w-0 flex-1 truncate text-sm font-medium hover:text-primary hover:underline"
             >
-              {highlightText(result.file_name, query)}
+              {renderText(result.file_name)}
             </Link>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-              <div
-                className={"h-full rounded-full transition-all " + barColor}
-                style={{ width: `${scorePercent}%` }}
-              />
+          {showScore && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={"h-full rounded-full transition-all " + barColor}
+                  style={{ width: `${scorePercent}%` }}
+                />
+              </div>
+              <span className="w-8 text-right text-xs font-medium text-muted-foreground">
+                {scorePercent}%
+              </span>
             </div>
-            <span className="w-8 text-right text-xs font-medium text-muted-foreground">
-              {scorePercent}%
-            </span>
-          </div>
+          )}
         </div>
 
-        {/* Snippet */}
+        {/* Snippet (BM25만 하이라이트) */}
         {result.snippet && (
           <p className="text-xs leading-relaxed text-muted-foreground line-clamp-2">
-            {highlightText(result.snippet, query)}
+            {renderText(result.snippet)}
           </p>
         )}
 
