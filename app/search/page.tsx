@@ -297,14 +297,17 @@ const colorMap = {
   blue: {
     badge: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300",
     header: "border-blue-200 dark:border-blue-800",
+    bar: "bg-blue-500",
   },
   purple: {
     badge: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-300",
     header: "border-purple-200 dark:border-purple-800",
+    bar: "bg-purple-500",
   },
   emerald: {
     badge: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300",
     header: "border-emerald-200 dark:border-emerald-800",
+    bar: "bg-emerald-500",
   },
 };
 
@@ -360,7 +363,7 @@ function ResultColumn({
                 key={index}
                 result={result}
                 rank={index + 1}
-                compact={!isFinal}
+                barColor={colors.bar}
                 query={query}
               />
             ))}
@@ -374,14 +377,16 @@ function ResultColumn({
 function ResultItem({
   result,
   rank,
-  compact,
+  barColor,
   query,
 }: {
   result: SearchResult;
   rank: number;
-  compact: boolean;
+  barColor: string;
   query: string;
 }) {
+  const scorePercent = Math.round(result.score * 100);
+
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50">
       {/* Rank */}
@@ -390,22 +395,36 @@ function ResultItem({
       </div>
 
       <div className="min-w-0 flex-1 space-y-1">
-        {/* Title */}
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="shrink-0">
-            <FileFormatIcon format={result.file_format} size="sm" />
+        {/* Title + Score */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="shrink-0">
+              <FileFormatIcon format={result.file_format} size="sm" />
+            </div>
+            <Link
+              href={`/documents/${result.document_id}`}
+              title={result.file_name}
+              className="block min-w-0 flex-1 truncate text-sm font-medium hover:text-primary hover:underline"
+            >
+              {highlightText(result.file_name, query)}
+            </Link>
           </div>
-          <Link
-            href={`/documents/${result.document_id}`}
-            title={result.file_name}
-            className="block min-w-0 flex-1 truncate text-sm font-medium hover:text-primary hover:underline"
-          >
-            {highlightText(result.file_name, query)}
-          </Link>
+
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+              <div
+                className={"h-full rounded-full transition-all " + barColor}
+                style={{ width: `${scorePercent}%` }}
+              />
+            </div>
+            <span className="w-8 text-right text-xs font-medium text-muted-foreground">
+              {scorePercent}%
+            </span>
+          </div>
         </div>
 
-        {/* Snippet (최종 결과에서만 표시) */}
-        {!compact && result.snippet && (
+        {/* Snippet */}
+        {result.snippet && (
           <p className="text-xs leading-relaxed text-muted-foreground line-clamp-2">
             {highlightText(result.snippet, query)}
           </p>
