@@ -3,7 +3,19 @@
 > 발신: docs-extract-system 팀
 > 수신: milvus-indexer 팀, rag-manager 팀
 > 작성일: 2026-04-15
-> 상태: **제안 (합의 필요)**
+> 상태: **반영 완료 (2026-04-16)** — 아래 설계는 rag-manager에 구현되었습니다.
+
+> ⚠️ **이 문서는 제안 시점의 기록입니다.** 이후 필드명이 바뀌었으므로
+> 현재 연동 스펙은 [HANDOFF.md](HANDOFF.md) 를 정본으로 참고하세요.
+>
+> | 이 문서 표기 | 현재 |
+> |--------------|------|
+> | `user_key` | `tenant_id` |
+> | `uuid` | `file_id` |
+> | (없음) | `collection_name` (= clientServiceId) |
+>
+> 구현 위치: `lib/services/deletion-gate.ts`, `lib/services/timeout-job.ts`,
+> `lib/services/event-consumer.ts`, `deletion_confirmations` 테이블
 
 ---
 

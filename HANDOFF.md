@@ -1,280 +1,440 @@
 # RAG Manager - 연동 가이드
 
+외부 시스템(docs-extract-system, milvus-indexer, milvus-broker, extract-unstructured)과의
+연동 계약을 정리한 문서입니다. 내부 구조는 [DEVELOPMENT.md](DEVELOPMENT.md) 참고.
+
+---
+
 ## 1. 시스템 구성
 
 ```
-┌──────────┐  POST /v1/files  ┌──────────────┐                ┌──────────────┐
-│ Client   │─────────────────▶│ rag-manager  │                │    Milvus    │
-└──────────┘                  │              │                └──────▲───────┘
-                              │  file_status │                       │
-                              └──┬────────▲──┘                       │
-                                 │ XADD   │ XACK / 상태갱신          │
-                                 │        │                          │
-                              ┌──▼────────┴──────────────────┐       │
-                              │        Redis Streams          │       │
-                              │  rag:documents → cg:extract   │       │
-                              │  rag:extract   → cg:rag-manager       │
-                              └──┬──────────▲──────────▲─────┘       │
-                                 │          │          │             │
-                                 │ XREAD    │ XADD     │ consume     │
-                                 ▼          │          ▼             │
-                          ┌──────────────────┐  ┌──────────────┐     │
-                          │docs-extract-system│  │milvus-indexer│─────┘
-                          └──────┬────────────┘  └──────────────┘
-                                 │ JSON 저장
-                                 ▼
-                          ┌──────────────────┐
-                          │ /data/diva/extract  │
-                          └──────────────────┘
+                    ┌──────────────────────────────┐
+   브라우저 ───────▶│         rag-manager          │
+                    └───┬────────┬────────┬────────┘
+                        │        │        │
+        ┌───────────────┘        │        └────────────────┐
+        │ Redis Streams          │ HTTP                    │ HTTP
+        ▼                        ▼                         ▼
+ ┌──────────────┐    ┌──────────────────────┐   ┌────────────────────┐
+ │ rag:documents│    │ extract-unstructured │   │   milvus-broker    │
+ │ rag:extract  │    │  (URL 학습 등록)     │   │   (RAG 검색)       │
+ │ rag:index    │    └──────────────────────┘   └─────────┬──────────┘
+ └──┬────────▲──┘                                         │
+    │        │                                            ▼
+    ▼        │                                      ┌──────────┐
+┌───────────────────┐   ┌───────────────┐           │  Milvus  │
+│docs-extract-system│──▶│ milvus-indexer│──────────▶└──────────┘
+└─────────┬─────────┘   └───────────────┘
+          │ 추출 JSON 저장
+          ▼
+   /data/diva/extract
 ```
 
-**rag-manager의 통신 대상은 docs-extract-system만**입니다. milvus-indexer 관련 이벤트/상태는 수신하지 않습니다.
+rag-manager는 **`rag:extract` 와 `rag:index` 두 스트림을 모두 구독**합니다.
+(과거에는 extract만 구독했으나, 인덱싱 완료/실패와 분산 삭제 confirmation을 받기 위해 확장됨)
 
 ---
 
-## 2. DB 스키마
+## 2. 멀티테넌시 규약
 
-**DB:** `192.168.220.223:3306/extract_document`
-**테이블:** `document_files`
+모든 등록·검색 요청은 두 개의 식별자를 동반합니다.
 
-| 컬럼 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| uuid | VARCHAR(30) | PK | TSID 기반 고유 ID |
-| file_name | VARCHAR(500) | | 원본 파일명 |
-| user_key | VARCHAR(100) | | 업로드 사용자 식별 키 (= DNIS = partition_name) |
-| file_format | VARCHAR(20) | | pdf/docx/txt/hwp/xlsx/pptx |
-| file_status | VARCHAR(20) | UPLOADED | 파일 처리 상태 |
-| file_size | BIGINT | | 바이트 |
-| rgst_dt | DATETIME | now() | 등록일시 |
-| rgst_nm | VARCHAR(100) | | 등록자명 |
-| status | VARCHAR(10) | ACTIVE | 문서 관리 상태 (ACTIVE/DELETED) |
-| updt_dt | DATETIME | auto | 수정일시 |
-| updt_nm | VARCHAR(100) | | 수정자명 |
+| 식별자 | 의미 | 쓰임 |
+|--------|------|------|
+| `clientServiceId` | 서비스(고객사) 단위 | **Milvus 컬렉션명**, 파일 경로 1단계, `document_files.collection_name` |
+| `tenantId` | 테넌트(사용자 그룹) 단위 | **Milvus 파티션 키**, 파일 경로 2단계, `document_files.tenant_id` |
 
-### 상태 전이 (rag-manager 관점)
+- 검색 시 컬렉션은 `clientServiceId`, 파티션 격리는 `tenant_id` 로 이뤄집니다.
+- 환경변수 `MILVUS_COLLECTION_NAME` 은 **폐기**되었습니다 (요청값으로 동적 결정).
+
+---
+
+## 3. DB 스키마
+
+**DB:** MariaDB `extract_document` — docs-extract-system과 공유
+**rag-manager 소유 테이블:** `document_files`, `processed_events`, `deletion_confirmations`
+**docs-extract-system 소유:** `extraction_task`, `alembic_version`
+
+전체 DDL은 [`prisma/init_schema.sql`](prisma/init_schema.sql) 이 정본입니다.
+
+### document_files (주요 컬럼)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| file_id | VARCHAR(26) PK | ULID |
+| source_type | VARCHAR(10) | `file` / `url` |
+| source_url | VARCHAR(2048) NULL | URL 등록 시 원본 URL |
+| file_name | VARCHAR(500) | 파일명 (URL은 `호스트_경로.url` 형태) |
+| tenant_id | VARCHAR(100) | 테넌트 = Milvus partition |
+| collection_name | VARCHAR(200) NULL | clientServiceId = Milvus collection |
+| file_format | VARCHAR(20) NULL | URL 케이스는 NULL |
+| file_status | VARCHAR(20) | 처리 상태 |
+| status | VARCHAR(30) | 관리 상태 (ACTIVE/DELETING/DELETED/DELETE_PARTIAL_FAILURE) |
+| origin_path | VARCHAR(1000) NULL | 원본 절대 경로 |
+| retry_count | INT | 재시도 횟수 (최대 3) |
+| last_error_code | VARCHAR(50) NULL | 마지막 실패 코드 |
+
+> ⚠️ 과거 문서의 `uuid`, `user_key` 컬럼은 각각 **`file_id`, `tenant_id`** 로 바뀌었습니다.
+
+### 상태 전이
 
 ```
 file_status:
-  UPLOADED ──▶ PROCESSING ──▶ EXTRACTED (성공)
-                    │
-                    └──▶ FAILED (실패)
+  UPLOADED ─▶ PROCESSING ─▶ EXTRACTED ─▶ INDEXED
+                  │                          │
+                  ├─▶ FAILED                 └─▶ INDEX_FAILED
 
-status (소프트 삭제):
-  ACTIVE ──▶ DELETED
+status:
+  ACTIVE ─▶ DELETING ─▶ DELETED
+                    └─▶ DELETE_PARTIAL_FAILURE
 ```
 
-| file_status | 의미 | 변경 주체 | 트리거 |
-|-------------|------|-----------|--------|
-| UPLOADED | 업로드 완료 | rag-manager | POST /v1/files |
-| PROCESSING | 추출 중 | rag-manager | rag:extract → EXTRACT_STARTED 수신 |
-| EXTRACTED | 추출 완료 | rag-manager | rag:extract → EXTRACT_COMPLETED 수신 |
-| FAILED | 추출 실패 | rag-manager | rag:extract → EXTRACT_FAILED 수신 |
+| file_status | 트리거 |
+|-------------|--------|
+| UPLOADED | rag-manager 등록 완료 |
+| PROCESSING | `EXTRACT_STARTED` 수신 (또는 재시도 재발행 시) |
+| EXTRACTED | `EXTRACT_COMPLETED` 수신 |
+| INDEXED | `INDEX_COMPLETED` 수신 |
+| FAILED | `EXTRACT_FAILED` 수신 + 재시도 소진 |
+| INDEX_FAILED | `INDEX_FAILED` 수신 + 재시도 소진 |
 
 ---
 
-## 3. 파일 저장 구조
+## 4. 파일 저장 구조
 
 ```
-/data/diva/origin/{uuid}/{원본파일명}     ← rag-manager가 업로드 시 저장 (공유 볼륨)
-/data/diva/extract/{uuid}/                   ← docs-extract-system이 추출 결과 JSON 저장 (공유 볼륨)
+{ORIGIN_PATH}/{clientServiceId}/{tenantId}/{file_id}.{ext}    ← rag-manager 저장
+{EXTRACT_PATH}/...                                             ← docs-extract-system 저장
 ```
 
-- rag-manager는 `/data/diva/extract`를 **읽기만** 함 (미리보기용)
-- 경로는 환경변수(`ORIGIN_PATH`, `EXTRACT_PATH`)로 주입
+- 운영 기준: `ORIGIN_PATH=/data/diva/origin`, `EXTRACT_PATH=/data/diva/extract`
+- rag-manager는 `EXTRACT_PATH` 를 **읽기만** 합니다 (미리보기용)
+- 두 경로는 rag-manager 컨테이너와 docs-extract-system이 **공유 볼륨**으로 접근해야 합니다
 
 ---
 
-## 4. Redis Streams 연동
+## 5. Redis Streams 연동
 
-### 4.1 연결 정보
+### 5.1 스트림 구조
 
-| 항목 | 값 |
-|------|-----|
-| 주소 | 192.168.220.222:6379 |
-| DB | 0 |
-| 비밀번호 | 없음 |
+| 스트림 | 발행자 | rag-manager 역할 | 이벤트 |
+|--------|--------|------------------|--------|
+| `rag:documents` | rag-manager | **발행** | DOCUMENT_UPLOADED, DOCUMENT_DELETED |
+| `rag:extract` | docs-extract-system | **구독** (`cg:rag-manager`) | EXTRACT_STARTED/COMPLETED/FAILED/DELETED/DELETE_FAILED |
+| `rag:index` | milvus-indexer | **구독** (`cg:rag-manager`) | INDEX_COMPLETED/FAILED/DELETED/DELETE_FAILED |
+| `rag:*:dlq` | 각 consumer | 수동 처리 | 재시도 초과 |
 
-### 4.2 스트림 구조
+- Consumer Group: `cg:rag-manager`
+- Consumer 이름: `rag-manager-{hostname}-{pid}`
+- 발행 시 `MAXLEN ~ 100000` 적용
+- 페이로드는 단일 필드 `data` 에 JSON 문자열로 담습니다: `XADD rag:documents * data '<json>'`
 
-| 스트림 키 | 발행자 | 구독자 (Consumer Group) | 이벤트 |
-|-----------|--------|-------------------------|--------|
-| `rag:documents` | rag-manager | `cg:extract`(docs-extract-system), `cg:milvus`(milvus-indexer) | DOCUMENT_UPLOADED, DOCUMENT_DELETED |
-| `rag:extract` | docs-extract-system | `cg:rag-manager`, `cg:milvus` | EXTRACT_STARTED, EXTRACT_COMPLETED, EXTRACT_FAILED |
-| `rag:documents:dlq` | 각 consumer | 수동 | 재시도 초과 항목 |
-| `rag:extract:dlq` | 각 consumer | 수동 | 재시도 초과 항목 |
+### 5.2 공통 필드
 
-### 4.3 rag-manager 발행 (rag:documents)
+모든 이벤트는 아래 3개 필드를 포함합니다.
 
-**DOCUMENT_UPLOADED** — 파일 업로드 완료 후
+| 필드 | 설명 |
+|------|------|
+| `event_id` | 이벤트 고유 ID (ULID). **멱등성 키** |
+| `schema_version` | 현재 `"1"` |
+| `timestamp` | ISO 8601 |
+
+### 5.3 rag-manager 발행 (`rag:documents`)
+
+**DOCUMENT_UPLOADED** — 파일 등록 완료 후, 그리고 재시도 시 재발행
 ```json
 {
-  "event": "DOCUMENT_UPLOADED",
-  "uuid": "8sClidpsJpw",
+  "event_id": "01JBXK...",
+  "event_type": "DOCUMENT_UPLOADED",
+  "schema_version": "1",
+  "timestamp": "2026-08-13T10:30:00.000Z",
+  "file_id": "01JBXK7Q2N4W8ZC3F5H9M1TPVR",
+  "tenant_id": "user001",
+  "collection_name": "25",
   "file_name": "문서.pdf",
-  "file_format": "pdf",
-  "file_path": "/data/diva/origin/8sClidpsJpw/문서.pdf",
-  "user_key": "user01",
-  "timestamp": "2026-04-13T10:30:00.000Z"
+  "file_type": "pdf",
+  "file_size": 102400,
+  "origin_path": "/data/diva/origin/25/user001/01JBXK7Q2N4W8ZC3F5H9M1TPVR.pdf"
 }
 ```
 
-**DOCUMENT_DELETED** — 소프트 삭제 후
+**DOCUMENT_DELETED** — 삭제 요청 시
 ```json
 {
-  "event": "DOCUMENT_DELETED",
-  "uuid": "8sClidpsJpw",
-  "timestamp": "2026-04-13T11:00:00.000Z"
+  "event_id": "01JBXL...",
+  "event_type": "DOCUMENT_DELETED",
+  "schema_version": "1",
+  "timestamp": "2026-08-13T11:00:00.000Z",
+  "file_id": "01JBXK7Q2N4W8ZC3F5H9M1TPVR",
+  "tenant_id": "user001",
+  "collection_name": "25"
 }
 ```
 
-### 4.4 rag-manager 구독 (rag:extract, cg:rag-manager)
+### 5.4 rag-manager 구독
 
-| 이벤트 | DB 처리 |
-|--------|---------|
-| `EXTRACT_STARTED` | file_status → PROCESSING |
-| `EXTRACT_COMPLETED` | file_status → EXTRACTED |
-| `EXTRACT_FAILED` | file_status → FAILED |
+수신 이벤트의 공통 필드 + `file_id` 는 **필수**입니다. 없으면 ACK 후 스킵합니다.
+실패 이벤트는 `error_code`, `error_message`, `retryable` 을 함께 보내주세요.
 
-메시지 예시:
+| 스트림 | 이벤트 | rag-manager 처리 |
+|--------|--------|------------------|
+| `rag:extract` | `EXTRACT_STARTED` | file_status → PROCESSING |
+| | `EXTRACT_COMPLETED` | file_status → EXTRACTED |
+| | `EXTRACT_FAILED` | 재시도 가능하면 재발행, 아니면 FAILED |
+| | `EXTRACT_DELETED` | 삭제 게이트 extract 확인 |
+| | `EXTRACT_DELETE_FAILED` | status → DELETE_PARTIAL_FAILURE |
+| `rag:index` | `INDEX_COMPLETED` | file_status → INDEXED |
+| | `INDEX_FAILED` | 재시도 가능하면 재발행, 아니면 INDEX_FAILED |
+| | `INDEX_DELETED` | 삭제 게이트 index 확인 |
+| | `INDEX_DELETE_FAILED` | status → DELETE_PARTIAL_FAILURE |
+
+수신 예시:
 ```json
 {
-  "event": "EXTRACT_COMPLETED",
-  "uuid": "8sClidpsJpw",
-  "timestamp": "2026-04-13T10:35:00.000Z"
+  "event_id": "01JBXM...",
+  "event_type": "EXTRACT_FAILED",
+  "schema_version": "1",
+  "timestamp": "2026-08-13T10:35:00.000Z",
+  "file_id": "01JBXK7Q2N4W8ZC3F5H9M1TPVR",
+  "tenant_id": "user001",
+  "error_code": "EXTRACT_TIMEOUT",
+  "error_message": "처리 시간 초과",
+  "retryable": true
 }
 ```
 
-### 4.5 재처리 / DLQ
+### 5.5 멱등성
+
+수신한 `event_id` 는 `processed_events` 테이블에 기록되며, **이미 있으면 스킵**합니다.
+
+> `event_id` 컬럼은 VARCHAR(**100**) 입니다. 이보다 긴 ID를 보내면 저장에 실패합니다.
+
+### 5.6 재처리 / DLQ
 
 ```
-XREADGROUP → 처리 성공? → XACK
-           → 실패/crash → PEL 잔류
-                         → XAUTOCLAIM (30초 주기)
-                         → delivery_count ≥ 5 → rag:extract:dlq로 XADD + 원 스트림 XACK
+XREADGROUP (COUNT 16, BLOCK 5s) → 처리 성공 → XACK
+                                → 실패/crash → PEL 잔류
+                                              → XAUTOCLAIM (30초 주기, idle 60초)
+                                              → delivery_count ≥ 5 → {stream}:dlq 로 이동 + XACK
 ```
+
+애플리케이션 레벨 재시도(추출/인덱싱 재발행)는 `retry_count < 3` 까지입니다.
+
+### 5.7 URL 케이스 주의
+
+`source_type = 'url'` 문서는 **스트림 재발행으로 재시도할 수 없습니다**
+(HTTP로 진입한 작업이라 `DOCUMENT_UPLOADED` 재발행이 무의미).
+따라서 `EXTRACT_FAILED` / `INDEX_FAILED` 수신 시 `retryable` 값과 무관하게 즉시 실패로 확정합니다.
 
 ---
 
-## 5. 검색 API (milvus-broker)
+## 6. 분산 삭제 프로토콜
 
-rag-manager `/api/search` → **milvus-broker** → Milvus
+```
+사용자 DELETE 요청
+  ├─ document_files.status = DELETING
+  ├─ deletion_confirmations 생성 (deletion_due_at = now + 5분)
+  └─ DOCUMENT_DELETED 발행
+        │
+        ├── docs-extract-system ──▶ EXTRACT_DELETED  (또는 EXTRACT_DELETE_FAILED)
+        └── milvus-indexer      ──▶ INDEX_DELETED    (또는 INDEX_DELETE_FAILED)
 
-### 5.1 milvus-broker 엔드포인트
+  둘 다 확인 ─▶ 원본 파일 unlink ─▶ status = DELETED
+  5분 초과   ─▶ timeout-job(1분 주기) ─▶ status = DELETE_PARTIAL_FAILURE
+  하나라도 FAILED ────────────────────▶ status = DELETE_PARTIAL_FAILURE
+```
 
-| 방식 | URL | 용도 |
-|------|-----|------|
-| Hybrid (권장) | `POST /v2/collections/hybrid/workcenter/{collection_name}/partitions/search` | BGE-M3 sparse + Dense RRF |
-| Dense | `POST /v2/collections/workcenter/{collection_name}/partitions/search` | Vector만 |
+**양측 모두 반드시 응답해야 합니다.** 한쪽이 침묵하면 5분 뒤
+`DELETE_PARTIAL_FAILURE` 로 확정되어 수동 확인 대상이 됩니다.
 
-- **BM25 단독 엔드포인트 없음** (Hybrid에서만 sparse 포함)
-- 인증: 없음. `dnis(= user_key)`로 partition 격리
-- 포트: milvus-broker 9005 / Milvus Gateway 8009
+URL 문서는 추가로 extract-unstructured에 `DELETE /v1/extract/tasks/url/{file_id}` 도 호출합니다.
 
-### 5.2 요청
+---
+
+## 7. 검색 API (milvus-broker)
+
+`rag-manager /api/search` → **milvus-broker** → Milvus
+
+### 7.1 엔드포인트
+
+| 방식 | URL |
+|------|-----|
+| Hybrid | `POST {BROKER}/v2/collections/hybrid/{clientServiceId}/partitions/search` |
+| BM25 (sparse) | `POST {BROKER}/v2/collections/sparse/workcenter/{clientServiceId}/partitions/search` |
+| Vector (dense) | `POST {BROKER}/v2/collections/workcenter/{clientServiceId}/partitions/search` |
+
+- 인증 없음. `tenant_id` 로 partition 격리
+- 타임아웃 10초
+
+### 7.2 요청
 
 ```json
 {
-  "dnis": "user01",
+  "tenant_id": "user001",
   "message": "검색어",
-  "index_info": { "index_type": "HNSW", "metric_type": "L2", "params": {} },
-  "limit": 10
+  "index_info": { "index_type": "HNSW", "metric_type": "COSINE", "params": {} },
+  "limit": 5
 }
 ```
 
-### 5.3 응답
+| 방식 | index_info | 추가 필드 |
+|------|-----------|-----------|
+| Vector | `HNSW` / `COSINE` | — |
+| BM25 | `HNSW` / `IP` | — |
+| Hybrid | `HNSW` / `COSINE` | `ranker: { type: "weighted", weights: { dense: 0.3, sparse: 0.7 } }` |
+
+> 요청 키는 `dnis` 가 아니라 **`tenant_id`** 입니다 (구 스펙에서 변경됨).
+
+### 7.3 응답
 
 ```json
 {
   "code": 2000,
-  "error_code": null,
-  "error_message": null,
+  "errCode": null,
+  "errMessage": null,
   "body": [
     {
       "id": "...",
-      "distance": 0.95,
+      "distance": 0.87,
       "entity": {
         "id": "...",
         "file_name": "문서.pdf",
         "chunk_context": "실제 청크 문장",
         "category": "...",
-        "sub_category": "..."
+        "sub_category": "page_3",
+        "url": "..."
       }
     }
   ]
 }
 ```
 
-- `distance`는 L2 거리 (작을수록 유사) → rag-manager에서 UI 표시용 0~1 score로 변환 필요
-- `chunk_context`가 snippet으로 표시됨
+- **HTTP 200이어도 `code != 2000` 이면 실패**로 처리합니다 (에러 필드는 `errCode`/`errMessage`)
+- `sub_category` 가 `page_N` 형태면 스니펫 앞에 `[p.N]` 으로 표시
+- 점수 처리:
+  - **Vector** — COSINE 유사도는 절대 척도이므로 원본값 유지 (0~1 clamp)
+  - **BM25 / Hybrid** — IP·가중 융합 점수는 절대 척도가 아니므로 결과 내 max 기준 상대 정규화
 
-### 5.4 헬스체크
+### 7.4 헬스체크
 
-- `GET /health`
-- `GET /ping` → "success"
+`GET /health` — rag-manager `/api/health` 의 `milvus_broker` 항목에서 호출
 
 ---
 
-## 6. rag-manager API 스펙
+## 8. URL 학습 API (extract-unstructured)
 
-### 6.1 문서 관리
+rag-manager `/api/documents/url` → **extract-unstructured** HTTP 호출 (동기)
+
+### 8.1 등록
+
+`POST {EXTRACT_SERVICE_URL}/v1/extract/tasks/url`
+
+```json
+{
+  "file_id": "01JBXK7Q2N4W8ZC3F5H9M1TPVR",
+  "url": "https://example.com/docs",
+  "tenant_id": "user001",
+  "collection_name": "25",
+  "crawler_options": {
+    "max_pages": 10,
+    "max_depth": 2,
+    "allow_external_links": false
+  }
+}
+```
+
+| crawler_options | 범위 |
+|-----------------|------|
+| `max_pages` | 1 ~ 500 |
+| `max_depth` | 0 ~ 10 |
+| `allow_external_links` | boolean |
+
+### 8.2 삭제
+
+`DELETE {EXTRACT_SERVICE_URL}/v1/extract/tasks/url/{file_id}`
+
+### 8.3 응답 규약
+
+```json
+{ "success": true, "data": { ... }, "message": null, "code": 200 }
+```
+
+`success: false` 이거나 HTTP 에러면 실패로 처리합니다. 타임아웃 10초.
+
+### 8.4 URL → file_name 규칙
+
+`https://www.example.com/about?x=1` → `www.example.com_about_x=1.url` (100자 초과 시 절단)
+`http(s)` 만 허용하며, 요청당 최대 50건입니다.
+
+---
+
+## 9. rag-manager API 스펙
 
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| GET | `/api/documents` | 목록 (page, size, sort, order, search, format, status, file_status) |
-| POST | `/api/documents` | 파일 업로드 (multipart, files[]) |
-| GET | `/api/documents/{uuid}` | 상세 조회 |
-| DELETE | `/api/documents/{uuid}` | 소프트 삭제 |
-| POST | `/api/documents/bulk-delete` | 일괄 삭제 (body: `{ids: string[]}`, 최대 100건) |
-| GET | `/api/documents/{uuid}/download` | 스트리밍 다운로드 |
-| GET | `/api/documents/{uuid}/preview` | 미리보기 (TXT 원본 / EXTRACTED 상태는 /data/diva/extract 내용) |
-| POST | `/api/search` | RAG 검색 (query, method, top_k) |
-| GET | `/api/health` | 헬스체크 (DB/스토리지 상태) |
+| GET | `/api/documents` | 목록 (page, size, sort, order, search, format, status, file_status, clientServiceId, tenantId) |
+| POST | `/api/documents` | 파일 업로드 (multipart: `files[]`, `clientServiceId`, `tenantId`) |
+| POST | `/api/documents/url` | URL 등록 (`urls[]`, `crawler_options`, identity) |
+| GET | `/api/documents/{file_id}` | 상세 |
+| DELETE | `/api/documents/{file_id}` | 삭제 요청 |
+| POST | `/api/documents/bulk-delete` | 일괄 삭제 (`{ids}`, 최대 100건) |
+| GET | `/api/documents/{file_id}/download` | 스트리밍 다운로드 |
+| GET | `/api/documents/{file_id}/preview` | 원본/추출 미리보기 |
+| POST | `/api/search` | RAG 검색 (`query`, `method`, `top_k`, identity) |
+| GET | `/api/health` | 헬스체크 |
 
-### 6.2 업로드 제약
+**`clientServiceId` + `tenantId` 는 등록·검색 요청에 필수**입니다 (누락 시 400).
 
-- 형식: pdf, docx, txt, hwp, xlsx, pptx
-- 크기: 100MB/파일
-- 중복: 동일 user_key + file_name ACTIVE 존재 시 경고
-- Rate Limit: IP당 분당 20회 (프로덕션만)
-
-### 6.3 에러 코드
-
-| 코드 | 의미 |
-|------|------|
-| 400 | 유효성 검증 실패 |
-| 404 | 문서/파일 없음 |
-| 409 | 이미 삭제된 문서 |
-| 410 | 삭제된 문서 다운로드 시도 |
-| 429 | Rate Limit 초과 |
-| 500 | 서버 오류 |
-
----
-
-## 7. 보안
-
-| 항목 | 상태 |
-|------|------|
-| 인증 | **미구현** (임시 하드코딩: user_key=user01, 이름=admin) |
-| 파일명 경로 조작 | 차단 (basename + resolve 검증) |
-| 파일 크기 제한 | 100MB, 서버사이드 이중 검증 |
-| 보안 헤더 | X-Frame-Options, XSS-Protection, HSTS 등 |
-| Rate Limiting | IP 기반 (업로드 20/분, 검색 60/분, 프로덕션만) |
-| 파일명 검증 | 특수문자/널바이트/255자 제한 |
-| 업로드 롤백 | DB 실패 시 저장된 파일 자동 삭제 |
-
----
-
-## 8. 환경 정보
+### 업로드 제약
 
 | 항목 | 값 |
 |------|-----|
-| DB | mysql://root:aidb!@34@192.168.220.223:3306/extract_document |
+| 형식 | pdf, docx, pptx, xlsx, hwp, hwpx, txt, md, json, jpg, jpeg, png |
+| 파일명 | 100자 이하, 특수문자/널바이트 금지 |
+| 파일당 | 100MB |
+| 요청 합계 | 1GB |
+| Rate Limit | IP 기반, 프로덕션만 — `/api/documents` 20회/분, `/api/search` 60회/분 |
+
+### 에러 코드
+
+| HTTP | 의미 |
+|------|------|
+| 400 | 유효성 검증 실패 / identity 누락 |
+| 404 | 문서·파일 없음 |
+| 409 | 이미 삭제(또는 삭제 중)인 문서 |
+| 410 | 삭제된 문서 다운로드 시도 |
+| 429 | Rate Limit 초과 |
+| 500 | 서버 오류 |
+| 502 | 검색 서비스 비정상 응답 |
+| 503 | 검색 서비스 연결 불가/타임아웃, 헬스체크 critical 실패 |
+
+### 외부 error_code 매핑
+
+`lib/error-codes.ts` — 미등록 코드는 "처리 중 오류가 발생했습니다"로 표시됩니다.
+
+| code | 사용자 메시지 |
+|------|---------------|
+| UNSUPPORTED_FORMAT | 지원하지 않는 파일 형식입니다 |
+| FILE_CORRUPTED | 파일이 손상되어 처리할 수 없습니다 |
+| FILE_TOO_LARGE | 파일 크기가 제한을 초과했습니다 |
+| EXTRACT_TIMEOUT | 처리 시간이 초과되었습니다. 재시도됩니다 |
+| GPU_OOM | 서버 자원이 부족하여 재시도됩니다 |
+| OCR_FAILED | 문자 인식에 일시적인 오류가 발생했습니다. 재시도됩니다 |
+| INTERNAL_ERROR | 내부 처리 오류가 발생했습니다. 재시도됩니다 |
+
+---
+
+## 10. 환경 정보 (기존 운영 서버)
+
+> 신규 서버 구축 시 아래 값은 모두 교체 대상입니다. [DEPLOY.md](DEPLOY.md) 참고.
+
+| 항목 | 값 |
+|------|-----|
+| 배포 서버 | 192.168.220.223 (Docker, seri 계정 uid 1007 / gid 1012) |
+| rag-manager | :3000 |
+| DB | 192.168.220.223:3306 / `extract_document` (MariaDB 10.11) |
+| Redis | 192.168.220.222:6379 (db=0, 비밀번호 없음) |
+| milvus-broker | 192.168.220.223:8009 |
+| extract-unstructured | 192.168.220.223:9005 |
 | 원본 저장소 | /data/diva/origin |
 | 추출 저장소 | /data/diva/extract (읽기 전용) |
-| Redis | 192.168.220.222:6379 (db=0) |
-| docs-extract-system | 192.168.220.223:9005 |
-| milvus-broker | 192.168.220.223:8009 |
-| 배포 서버 | 223 (Docker, seri 계정) |
-| rag-manager 포트 | 3000 |
-| 허용 파일형식 | pdf, docx, txt, hwp, xlsx, pptx |
-| 최대 파일크기 | 100MB |

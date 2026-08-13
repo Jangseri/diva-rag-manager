@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     container_name: diva-rag-manager
-    user: "1007:1012"
+    # 호스트에서 /data/diva 를 소유한 계정의 uid:gid.
+    # 신규 서버에서는 `id <계정명>` 으로 확인 후 .env 에 APP_UID/APP_GID 를 지정하세요.
+    user: "${APP_UID:-1007}:${APP_GID:-1012}"
     ports:
       - "3000:3000"
     env_file:
@@ -14,7 +16,7 @@ services:
       - EXTRACT_PATH=/data/diva/extract
       - ENABLE_REDIS_CONSUMER=true
       - MAX_FILE_SIZE_MB=100
-      - NEXT_PUBLIC_APP_URL=http://192.168.220.223:3000
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://192.168.220.223:3000}
     volumes:
       - /data/diva:/data/diva
       - ./logs:/app/logs

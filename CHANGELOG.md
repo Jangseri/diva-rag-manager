@@ -2,6 +2,193 @@
 
 ---
 
+## 2026-08-13
+
+### 1. DB 스키마와 git 저장 정보 불일치 해소
+
+**문제:** 신규 서버 구축 시 git의 SQL로 DB를 만들면 코드와 스키마가 어긋남.
+아래 두 변경이 `prisma/schema.prisma` 에만 반영되고 SQL 파일이 커밋되지
+않아, git 기준 DB에는 `user_key` 컬럼과 VARCHAR(30) `event_id` 가 생성됨
+(→ Prisma `P2022` / `P2000`). `DEPLOY.md` 의 DB 구축 절차도 최초 버전
+스키마(`create_table.sql` + `alter_add_user_key.sql`)에 머물러 있어
+`deletion_confirmations` 테이블과 URL 학습 컬럼이 누락됨.
+
+**수정:**
+- `prisma/init_schema.sql` 신설 — 운영 DB(223)의 실제 DDL을 그대로 옮긴
+  전체 스키마. **신규 서버는 이 파일 하나만 실행**하면 됨
+- `prisma/migrate_20260629_tenant_id.sql` 신설 — 누락돼 있던 마이그레이션
+  (user_key → tenant_id, event_id 30 → 100)을 뒤늦게 기록
+- `prisma/schema.prisma`: 누락된 인덱스 6개를 명시해 실제 DB와 완전 일치
+  (`prisma db pull` 결과와 diff 0). `prisma db push` 로 만들어도 인덱스가
+  빠지지 않음
+- `DEPLOY.md`: DB 구축 절차 재작성 + 검증 쿼리, IP/계정 교체 대상 표,
+  P2022 트러블슈팅 추가. `extract_document` DB를 docs-extract-system과
+  공유한다는 사실 명시
+- `docker-compose.yml`: 하드코딩된 `user: "1007:1012"` 와
+  `NEXT_PUBLIC_APP_URL` 을 `.env` 로 주입 가능하도록 변경
+  (기본값은 기존 값 유지 → 223 서버 영향 없음)
+- `.env.production.example`, `.env.example`: 폐기된 `MILVUS_COLLECTION_NAME`
+  제거, `APP_UID`/`APP_GID` 추가
+
+---
+
+### 2. 문서 전체 최신화
+
+**문제:** `README.md` 가 create-next-app 기본 템플릿 상태였고,
+`DEVELOPMENT.md`/`HANDOFF.md` 는 초기 구현 시점(uuid PK, user_key,
+검색 stub, Redis 미연동)에 머물러 현재 코드와 크게 어긋남.
+
+**수정:**
+- `README.md`: 프로젝트 소개·빠른 시작·문서 인덱스·스키마 관리 규칙으로 재작성
+- `DEVELOPMENT.md`: 아키텍처 다이어그램, 디렉토리 구조, 3개 테이블 스키마,
+  상태 전이(INDEXED/INDEX_FAILED/DELETING/DELETE_PARTIAL_FAILURE 포함),
+  삭제 수명주기, API 스펙, 검색 3종 점수 처리, 환경변수 표로 전면 갱신
+- `HANDOFF.md`: 멀티테넌시 규약, `rag:index` 구독, 이벤트 페이로드 실제 형태,
+  분산 삭제 프로토콜, milvus-broker v2 스펙(`tenant_id`/`errCode`),
+  extract-unstructured URL API로 전면 갱신
+
+---
+
+## 2026-07-06
+
+### 1. milvus-broker 검색 스펙 최신화 + BM25/Vector/Hybrid 비교 UI 복원
+
+**문제:** broker 실검증(192.168.220.223:8009) 결과 요청 body 필드가
+`dnis` → `tenant_id` 로 바뀌고 `index_info`/`ranker` 구조가 달라짐.
+sparse(BM25) 전용 엔드포인트가 신설되어 hybrid 우회가 불필요해짐.
+
+**수정:**
+- `lib/services/milvus-broker.ts`: 요청 필드·엔드포인트 갱신,
+  BM25 전용 sparse 엔드포인트 사용
+- `app/search/page.tsx`: BM25 + Vector + Hybrid 3종 동시 호출 비교 UI로 복원
+
+---
+
+### 2. 검색 결과 카드에 스니펫·스코어 항상 표시
+
+**수정:**
+- `app/search/page.tsx`: compact 옵션 제거로 BM25/Vector 컬럼도 스니펫 노출,
+  컬럼별 색상의 퍼센트 바로 점수 표시
+
+---
+
+### 3. Vector 점수는 절대 코사인 유사도로, 하이라이트는 BM25에만 적용
+
+**문제:** BM25(IP)/Hybrid(weighted 융합) 점수는 배치 내 상대 정규화라
+100%가 절대 신뢰도처럼 오해될 수 있음. 하이라이트도 의미 기반 매칭인
+Vector/Hybrid에 적용되면 근거 없는 강조가 됨.
+
+**수정:**
+- `lib/services/milvus-broker.ts`: Vector(COSINE)는 정규화 없이 원본 유사도
+  사용(0~1 clamp), BM25/Hybrid만 결과 내 max 기준 상대 정규화
+- `app/search/page.tsx`: 검색어 하이라이트를 BM25 결과에만 적용
+
+---
+
+## 2026-06-29
+
+### 1. milvus-broker 스펙 업데이트 + URL 문서 미리보기 허용
+
+**수정:**
+- `lib/services/milvus-broker.ts`: workcenter 경로 세그먼트 제거,
+  metric_type `L2` → `COSINE`(KURE-v1 dense 인덱스 기준),
+  응답 파싱 필드 snake_case → camelCase(`errCode`/`errMessage`),
+  엔티티에 `url` 필드 추가
+- `app/documents/[id]/page.tsx`: URL 문서도 미리보기 카드 표시
+
+---
+
+### 2. user_key → tenant_id 전체 교체
+
+DB 컬럼명 변경에 맞춰 스키마·타입·서비스·API·UI·테스트를 일괄 교체.
+
+> ⚠️ 이 시점에 마이그레이션 SQL이 커밋되지 않아 이후 신규 서버 구축 시
+> 불일치의 원인이 되었습니다. 2026-08-13 자로
+> `prisma/migrate_20260629_tenant_id.sql` 에 뒤늦게 기록했습니다.
+
+---
+
+### 3. clientServiceId·tenantId 기반 멀티테넌트 파일 관리 구현
+
+**수정:**
+- `lib/identity.ts` 신설 — 요청 body/FormData에서 identity 추출·검증
+  (하드코딩된 `user01` 제거)
+- 파일 경로: `{ORIGIN_PATH}/{tenant_id}/` →
+  `{ORIGIN_PATH}/{clientServiceId}/{tenantId}/`
+- Milvus 컬렉션을 `MILVUS_COLLECTION_NAME` 환경변수 대신 요청의
+  `clientServiceId` 로 동적 지정, `document_files.collection_name` 에 저장
+- 업로드 다이얼로그·검색 페이지에 서비스 ID / 테넌트 ID 입력 필드 추가
+
+---
+
+### 4. 삭제 타임아웃 P2025 무한반복 제거 + processed_events.event_id 확장
+
+**문제:**
+- `finalizeTimeout` 이 document 부재 시 트랜잭션 롤백 → confirmation이
+  정리되지 않아 P2025가 무한 반복
+- RAG 인덱서의 `event_id` 가 30자를 초과해 P2000 저장 실패
+
+**수정:**
+- `lib/services/deletion-gate.ts`: document가 없으면 confirmation의
+  `finalized_at` 만 갱신 후 반환
+- `ProcessedEvent.event_id`: VARCHAR(30) → VARCHAR(100)
+
+> ⚠️ 이 컬럼 확장도 SQL이 커밋되지 않았습니다 (2026-08-13 자로 기록).
+
+---
+
+## 2026-04-29
+
+### 1. 학습 자료 확장 (파일 형식·파일명 제한·URL 학습)
+
+**수정:**
+- `lib/constants.ts`: 허용 형식에 `md`, `json`, `hwpx` 추가
+- `lib/validators/document.ts`: 파일명 100자 초과 시 거부
+- **URL 학습 신규**: 다중 입력 batch 등록(최대 50건),
+  `tenant_id` + `source_url` 중복 차단,
+  `source_type=url` 일 때 extract-service HTTP API 직접 호출(스트림 미발행),
+  목록·상세·삭제 흐름 분기
+- `prisma/migrate_20260429_url_source.sql`: `source_type`/`source_url` 컬럼 추가,
+  `file_format` NULL 허용
+- 환경변수 `EXTRACT_SERVICE_URL` 추가
+
+---
+
+### 2. document_files.status 컬럼 폭 확장 (10 → 30)
+
+**문제:** VARCHAR(10)은 `DELETE_PARTIAL_FAILURE`(22자)를 저장할 수 없어
+timeout-job의 status 갱신이 실패 → 해당 file_id가 영구히 `DELETING` 으로 잔류
+
+**수정:**
+- `prisma/migrate_20260429_status_width.sql` + `schema.prisma`
+
+---
+
+### 3. standalone 빌드 누락 모듈 수정 (split2, date-fns)
+
+**문제:** 운영 환경에서 pino-roll worker가
+`Cannot find module 'split2'` 로 죽어 파일 로깅이 동작하지 않음.
+`pino-abstract-transport` 가 런타임에 `split2` 를,
+pino-roll `dateFormat` 옵션이 `date-fns` 를 require하는데
+`outputFileTracingIncludes` 에 빠져 있었음.
+
+**수정:**
+- `next.config.ts`: `split2`, `date-fns` 를 standalone 번들에 포함
+
+---
+
+### 4. 학습 자료 등록 UI 통합 + 긴 파일명/URL 처리
+
+**수정:**
+- 업로드 다이얼로그: 파일/URL 동시 등록(단일 '등록' 버튼이 순차 처리),
+  URL 입력을 칩(chip) 방식으로 변경(Enter/쉼표/공백/Tab/paste 추가,
+  Backspace로 마지막 칩 제거), 진행률 바를 Tabs 밖으로 이동, 폭 고정
+- 긴 파일명/URL truncate 전반 수정: 목록 컬럼 명시적 width,
+  상세 헤더 `shrink-0`/`min-w-0 flex-1`, URL `<a>` 에 `block` 추가,
+  검색 결과 Link 레이아웃, 삭제 다이얼로그의 파일명 별도 박스 분리
+
+---
+
 ## 2026-04-24
 
 ### 1. 프로덕션 환경 파일 로깅 복원

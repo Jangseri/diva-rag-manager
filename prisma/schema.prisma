@@ -15,7 +15,7 @@ model Document {
   file_name       String   @db.VarChar(500)
   tenant_id       String   @db.VarChar(100)
   file_format     String?  @db.VarChar(20)
-  file_size       BigInt   @db.BigInt
+  file_size       BigInt
   file_status     String   @default("UPLOADED") @db.VarChar(20)
   collection_name String?  @db.VarChar(200)
   origin_path     String?  @db.VarChar(1000)
@@ -24,10 +24,17 @@ model Document {
   rgst_dt         DateTime @default(now()) @db.DateTime(0)
   rgst_nm         String   @db.VarChar(100)
   status          String   @default("ACTIVE") @db.VarChar(30)
-  updt_dt         DateTime @updatedAt @db.DateTime(0)
+  updt_dt         DateTime @default(now()) @updatedAt @db.DateTime(0)
   updt_nm         String   @db.VarChar(100)
 
-  @@index([source_type])
+  // 인덱스명은 운영 DB(prisma/init_schema.sql)와 동일하게 고정.
+  // idx_user_key 는 user_key -> tenant_id 컬럼명 변경 당시의 이름을 유지한 것.
+  @@index([file_format], map: "idx_file_format")
+  @@index([rgst_dt], map: "idx_rgst_dt")
+  @@index([source_type], map: "idx_source_type")
+  @@index([status], map: "idx_status")
+  @@index([tenant_id], map: "idx_user_key")
+  @@index([tenant_id, source_url(length: 255)], map: "idx_user_source_url")
   @@map("document_files")
 }
 
@@ -38,7 +45,8 @@ model ProcessedEvent {
   file_id      String?  @db.VarChar(26)
   processed_at DateTime @default(now()) @db.DateTime(0)
 
-  @@index([file_id])
+  @@index([file_id], map: "idx_file_id")
+  @@index([processed_at], map: "idx_processed_at")
   @@map("processed_events")
 }
 
@@ -54,8 +62,8 @@ model DeletionConfirmation {
   deletion_due_at      DateTime  @db.DateTime(0)
   finalized_at         DateTime? @db.DateTime(0)
   created_at           DateTime  @default(now()) @db.DateTime(0)
-  updated_at           DateTime  @updatedAt @db.DateTime(0)
+  updated_at           DateTime  @default(now()) @updatedAt @db.DateTime(0)
 
-  @@index([finalized_at, deletion_due_at])
+  @@index([finalized_at, deletion_due_at], map: "idx_finalized_due")
   @@map("deletion_confirmations")
 }
